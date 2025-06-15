@@ -1,0 +1,27 @@
+# 🧠😂🔥 Procfile для Heroku deployment 🧠😂🔥
+
+# Основний процес бота
+web: python main.py
+
+# Альтернативні варіанти запуску
+
+# З вказанням порту
+# web: python main.py --port $PORT
+
+# З додатковими параметрами
+# web: python main.py --verbose --log-level INFO
+
+# Для development
+# web: python main.py --dev
+
+# З міграціями БД при старті
+# release: python scripts/manage.py migrate
+# web: python main.py
+
+# Worker процеси (якщо потрібні)
+# worker: python worker.py
+# scheduler: python scheduler.py
+
+# Команди для maintenance
+# migrate: python scripts/manage.py migrate
+# backup: python scripts/backup.py create

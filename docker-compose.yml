@@ -1,0 +1,206 @@
+# 🧠😂🔥 Docker Compose для локальної розробки 🧠😂🔥
+
+version: '3.8'
+
+services:
+  # Головний бот
+  bot:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ukrainian_bot
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_ID=${ADMIN_ID}
+      - DATABASE_URL=postgresql://botuser:botpass@postgres:5432/ukrainian_bot
+      - REDIS_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DEBUG=True
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    ports:
+      - "8080:8080"
+    networks:
+      - bot_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # PostgreSQL база даних
+  postgres:
+    image: postgres:15-alpine
+    container_name: ukrainian_bot_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ukrainian_bot
+      POSTGRES_USER: botuser
+      POSTGRES_PASSWORD: botpass
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - bot_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U botuser -d ukrainian_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis для кешування
+  redis:
+    image: redis:7-alpine
+    container_name: ukrainian_bot_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - bot_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Моніторинг з Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ukrainian_bot_prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - bot_network
+
+  # Grafana для візуалізації
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ukrainian_bot_grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana-dashboard.json:/var/lib/grafana/dashboards/bot-dashboard.json
+    ports:
+      - "3000:3000"
+    networks:
+      - bot_network
+    depends_on:
+      - prometheus
+
+  # Nginx як reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: ukrainian_bot_nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - bot_network
+    depends_on:
+      - bot
+
+# Налаштування мереж
+networks:
+  bot_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Постійні томи
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+---
+# 🔧 Додаткові сервіси для розробки
+
+# Development override файл
+# Створіть docker-compose.override.yml для локальних налаштувань
+
+version: '3.8'
+
+services:
+  # Додаткові сервіси для тестування
+  
+  # PgAdmin для управління БД
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: ukrainian_bot_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@bot.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "8081:80"
+    networks:
+      - bot_network
+    depends_on:
+      - postgres
+
+  # Redis Commander для управління Redis
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: ukrainian_bot_redis_commander
+    restart: unless-stopped
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8082:8081"
+    networks:
+      - bot_network
+    depends_on:
+      - redis
+
+  # Mailhog для тестування email (якщо буде потрібно)
+  mailhog:
+    image: mailhog/mailhog
+    container_name: ukrainian_bot_mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP
+      - "8083:8025" # Web UI
+    networks:
+      - bot_network
+
+volumes:
+  pgadmin_data:
+    driver: local
