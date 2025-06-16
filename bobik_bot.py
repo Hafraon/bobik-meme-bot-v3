@@ -697,8 +697,8 @@ class AdvancedBobikBot:
                 # Запускаємо HTTP сервер для Railway
                 http_runner = await self.create_http_server()
                 
-                # Запускаємо планувальник постів
-                posting_task = asyncio.create_task(self.scheduled_posting())
+                # ВАЖЛИВО: Ініціалізуємо Telegram Application
+                await self.telegram_app.initialize()
                 
                 # Запускаємо Telegram бота
                 await self.telegram_app.start()
@@ -709,14 +709,20 @@ class AdvancedBobikBot:
                 logger.info(f"⏰ Розклад: {len(self.posting_schedule)} публікацій на день")
                 logger.info(f"🌐 HTTP сервер доступний на порті {PORT}")
                 
+                # Запускаємо планувальник постів ПІСЛЯ успішного запуску бота
+                posting_task = asyncio.create_task(self.scheduled_posting())
+                
                 # Чекаємо завершення
                 try:
                     await posting_task
                 except KeyboardInterrupt:
                     logger.info("🛑 Отримано сигнал зупинки")
                 finally:
+                    logger.info("🔄 Зупиняємо бота...")
                     await self.telegram_app.stop()
+                    await self.telegram_app.shutdown()
                     await http_runner.cleanup()
+                    logger.info("✅ Бот зупинено")
                     
             except Exception as e:
                 logger.error(f"❌ Помилка запуску: {e}")
