@@ -12,6 +12,10 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 from typing import Dict, List, Optional
 import threading
 
+# HTTP сервер для Railway
+from aiohttp import web, ClientSession
+from aiohttp.web import Response, json_response
+
 # Для ChatGPT інтеграції
 try:
     from openai import OpenAI
@@ -21,7 +25,7 @@ except ImportError:
     print("⚠️ OpenAI не встановлено. Працюємо без AI локалізації.")
 
 # Налаштування логування
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Railway налаштування
@@ -39,6 +43,7 @@ class AdvancedBobikBot:
         logger.info(f"🚀 Запуск в режимі: {ENVIRONMENT}")
         logger.info(f"📱 Канал ID: {self.channel_id}")
         logger.info(f"👤 Адмін ID: {self.admin_id}")
+        logger.info(f"🌐 HTTP порт: {PORT}")
         
         # OpenAI клієнт (опціонально)
         self.openai_client = None
@@ -68,7 +73,8 @@ class AdvancedBobikBot:
             'last_api_check': None,
             'localized_posts': 0,  # Кількість локалізованих постів
             'api_failures': {},     # Статистика відмов API
-            'content_sources': {}   # Статистика джерел контенту
+            'content_sources': {},   # Статистика джерел контенту
+            'server_start_time': datetime.now()
         }
         
         # Оптимальний розклад для української аудиторії (UTC+2 = Київський час)
@@ -145,46 +151,141 @@ class AdvancedBobikBot:
         }
         
         self.bot = None
+        self.telegram_app = None
         logger.info("🐕 Бобік 2.0 ініціалізовано успішно!")
 
-    async def health_check_handler(self, update, context):
-        """Health check endpoint для Railway"""
+    # HTTP endpoints для Railway
+    async def health_endpoint(self, request):
+        """HTTP Health check endpoint для Railway"""
         try:
-            bot_info = await context.bot.get_me()
+            uptime = datetime.now() - self.stats['server_start_time']
+            uptime_seconds = int(uptime.total_seconds())
+            
             health_data = {
                 "status": "healthy",
-                "bot_username": bot_info.username,
                 "environment": ENVIRONMENT,
                 "timestamp": datetime.now().isoformat(),
+                "uptime_seconds": uptime_seconds,
                 "total_posts": self.stats['total_posts'],
                 "posts_today": self.stats['posts_today'],
-                "ai_enabled": self.openai_client is not None
+                "ai_enabled": self.openai_client is not None,
+                "last_post": self.stats['last_post_time'].isoformat() if self.stats['last_post_time'] else None,
+                "bot_status": "running" if self.bot else "initializing"
             }
             
-            # Відправляємо health статус у вигляді повідомлення
-            if update and update.effective_chat:
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=f"🟢 Бот здоровий!\n\n"
-                         f"🤖 Username: @{bot_info.username}\n"
-                         f"🌍 Середовище: {ENVIRONMENT}\n"
-                         f"📊 Постів сьогодні: {self.stats['posts_today']}\n"
-                         f"📈 Всього постів: {self.stats['total_posts']}\n"
-                         f"🧠 AI: {'✅ Активний' if self.openai_client else '❌ Неактивний'}\n"
-                         f"⏰ {datetime.now().strftime('%H:%M:%S')}"
-                )
-            
-            logger.info(f"✅ Health check OK: {health_data}")
-            return health_data
+            logger.info(f"✅ Health check OK: uptime {uptime_seconds}s, posts today: {self.stats['posts_today']}")
+            return json_response(health_data, status=200)
             
         except Exception as e:
             logger.error(f"❌ Health check failed: {e}")
-            if update and update.effective_chat:
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=f"🔴 Помилка health check: {str(e)}"
-                )
-            return {"status": "unhealthy", "error": str(e)}
+            return json_response({
+                "status": "unhealthy", 
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }, status=503)
+
+    async def stats_endpoint(self, request):
+        """HTTP Stats endpoint"""
+        try:
+            # Розрахунок успішності
+            total_attempts = self.stats['successful_posts'] + self.stats['failed_posts']
+            success_rate = (self.stats['successful_posts'] / total_attempts * 100) if total_attempts > 0 else 0
+            
+            # Топ джерела
+            top_sources = sorted(self.stats['content_sources'].items(), key=lambda x: x[1], reverse=True)[:3]
+            
+            stats_data = {
+                "status": "ok",
+                "environment": ENVIRONMENT,
+                "timestamp": datetime.now().isoformat(),
+                "posts": {
+                    "today": self.stats['posts_today'],
+                    "total": self.stats['total_posts'],
+                    "successful": self.stats['successful_posts'],
+                    "failed": self.stats['failed_posts'],
+                    "success_rate": round(success_rate, 1)
+                },
+                "ai": {
+                    "enabled": self.openai_client is not None,
+                    "localized_posts": self.stats['localized_posts']
+                },
+                "sources": dict(top_sources),
+                "schedule": {
+                    "posts_per_day": len(self.posting_schedule),
+                    "next_post_time": self.get_next_post_time()
+                },
+                "uptime": int((datetime.now() - self.stats['server_start_time']).total_seconds())
+            }
+            
+            return json_response(stats_data, status=200)
+            
+        except Exception as e:
+            logger.error(f"❌ Stats endpoint failed: {e}")
+            return json_response({"error": str(e)}, status=500)
+
+    async def manual_post_endpoint(self, request):
+        """HTTP endpoint для ручного постингу"""
+        try:
+            logger.info("📤 Manual post requested via HTTP")
+            
+            # Отримуємо мем
+            meme = await self.get_smart_meme()
+            if meme:
+                # Локалізуємо за допомогою AI
+                meme = await self.localize_with_ai(meme)
+                
+                # Публікуємо
+                success = await self.post_meme_to_channel(meme)
+                if success:
+                    return json_response({
+                        "status": "success",
+                        "message": "Мем опублікований",
+                        "meme_title": meme.get('title', 'N/A'),
+                        "source": meme.get('source', 'N/A'),
+                        "localized": meme.get('localized', False)
+                    }, status=200)
+                else:
+                    return json_response({
+                        "status": "error",
+                        "message": "Помилка публікації"
+                    }, status=500)
+            else:
+                return json_response({
+                    "status": "error",
+                    "message": "Не вдалося отримати мем"
+                }, status=404)
+                
+        except Exception as e:
+            logger.error(f"❌ Manual post failed: {e}")
+            return json_response({"error": str(e)}, status=500)
+
+    def get_next_post_time(self) -> str:
+        """Визначає час наступного поста"""
+        try:
+            current_time = datetime.now().strftime("%H:%M")
+            current_minutes = datetime.now().hour * 60 + datetime.now().minute
+            
+            # Конвертуємо розклад у хвилини
+            schedule_minutes = []
+            for time_str in self.posting_schedule:
+                hour, minute = map(int, time_str.split(':'))
+                schedule_minutes.append(hour * 60 + minute)
+            
+            # Знаходимо наступний час
+            for schedule_time in sorted(schedule_minutes):
+                if schedule_time > current_minutes:
+                    hour = schedule_time // 60
+                    minute = schedule_time % 60
+                    return f"{hour:02d}:{minute:02d}"
+            
+            # Якщо сьогодні часу немає, повертаємо перший час завтра
+            first_time = min(schedule_minutes)
+            hour = first_time // 60
+            minute = first_time % 60
+            return f"{hour:02d}:{minute:02d} (завтра)"
+            
+        except Exception:
+            return "N/A"
 
     def get_meme_hash(self, url: str) -> str:
         """Генерує хеш для мему для запобігання дублікатів"""
@@ -195,54 +296,49 @@ class AdvancedBobikBot:
         try:
             logger.info(f"🔍 Запит до {source['name']}")
             
-            response = requests.get(source['url'], timeout=15)
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Перевіряємо чи це масив чи окремий об'єкт
-                if isinstance(data, list) and len(data) > 0:
-                    meme_data = data[0]
-                elif isinstance(data, dict):
-                    meme_data = data
-                else:
-                    logger.warning(f"⚠️ Незрозумілий формат відповіді від {source['name']}")
-                    return None
-                
-                # Валідація даних мему
-                if not all(key in meme_data for key in ['url', 'title']):
-                    logger.warning(f"⚠️ Неповні дані мему від {source['name']}")
-                    return None
-                
-                # Перевірка на дублікати
-                meme_hash = self.get_meme_hash(meme_data['url'])
-                if meme_hash in self.stats['posted_hashes']:
-                    logger.info(f"🔄 Мем вже був опублікований, пропускаємо")
-                    return None
-                
-                # Додаємо метадані
-                meme_data['source'] = source['name']
-                meme_data['hash'] = meme_hash
-                meme_data['ukrainian_friendly'] = source['ukrainian_friendly']
-                
-                # Оновлюємо статистику джерел
-                if source['name'] not in self.stats['content_sources']:
-                    self.stats['content_sources'][source['name']] = 0
-                self.stats['content_sources'][source['name']] += 1
-                
-                logger.info(f"✅ Отримано мем від {source['name']}: {meme_data['title'][:50]}...")
-                return meme_data
-                
-        except requests.exceptions.Timeout:
+            async with ClientSession() as session:
+                async with session.get(source['url'], timeout=15) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        # Перевіряємо чи це масив чи окремий об'єкт
+                        if isinstance(data, list) and len(data) > 0:
+                            meme_data = data[0]
+                        elif isinstance(data, dict):
+                            meme_data = data
+                        else:
+                            logger.warning(f"⚠️ Незрозумілий формат відповіді від {source['name']}")
+                            return None
+                        
+                        # Валідація даних мему
+                        if not all(key in meme_data for key in ['url', 'title']):
+                            logger.warning(f"⚠️ Неповні дані мему від {source['name']}")
+                            return None
+                        
+                        # Перевірка на дублікати
+                        meme_hash = self.get_meme_hash(meme_data['url'])
+                        if meme_hash in self.stats['posted_hashes']:
+                            logger.info(f"🔄 Мем вже був опублікований, пропускаємо")
+                            return None
+                        
+                        # Додаємо метадані
+                        meme_data['source'] = source['name']
+                        meme_data['hash'] = meme_hash
+                        meme_data['ukrainian_friendly'] = source['ukrainian_friendly']
+                        
+                        # Оновлюємо статистику джерел
+                        if source['name'] not in self.stats['content_sources']:
+                            self.stats['content_sources'][source['name']] = 0
+                        self.stats['content_sources'][source['name']] += 1
+                        
+                        logger.info(f"✅ Отримано мем від {source['name']}: {meme_data['title'][:50]}...")
+                        return meme_data
+                        
+        except asyncio.TimeoutError:
             logger.warning(f"⏰ Таймаут для {source['name']}")
             self.stats['api_failures'][source['name']] = self.stats['api_failures'].get(source['name'], 0) + 1
-        except requests.exceptions.RequestException as e:
-            logger.error(f"🌐 Помилка мережі для {source['name']}: {e}")
-            self.stats['api_failures'][source['name']] = self.stats['api_failures'].get(source['name'], 0) + 1
-        except json.JSONDecodeError:
-            logger.error(f"📄 Помилка парсингу JSON від {source['name']}")
-            self.stats['api_failures'][source['name']] = self.stats['api_failures'].get(source['name'], 0) + 1
         except Exception as e:
-            logger.error(f"❌ Несподівана помилка для {source['name']}: {e}")
+            logger.error(f"❌ Помилка для {source['name']}: {e}")
             self.stats['api_failures'][source['name']] = self.stats['api_failures'].get(source['name'], 0) + 1
         
         return None
@@ -432,6 +528,45 @@ class AdvancedBobikBot:
                 logger.error(f"❌ Помилка в автопубликуванні: {e}")
                 await asyncio.sleep(60)
 
+    async def health_check_handler(self, update, context):
+        """Health check handler для Telegram команд"""
+        try:
+            bot_info = await context.bot.get_me()
+            health_data = {
+                "status": "healthy",
+                "bot_username": bot_info.username,
+                "environment": ENVIRONMENT,
+                "timestamp": datetime.now().isoformat(),
+                "total_posts": self.stats['total_posts'],
+                "posts_today": self.stats['posts_today'],
+                "ai_enabled": self.openai_client is not None
+            }
+            
+            # Відправляємо health статус у вигляді повідомлення
+            if update and update.effective_chat:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"🟢 Бот здоровий!\n\n"
+                         f"🤖 Username: @{bot_info.username}\n"
+                         f"🌍 Середовище: {ENVIRONMENT}\n"
+                         f"📊 Постів сьогодні: {self.stats['posts_today']}\n"
+                         f"📈 Всього постів: {self.stats['total_posts']}\n"
+                         f"🧠 AI: {'✅ Активний' if self.openai_client else '❌ Неактивний'}\n"
+                         f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+                )
+            
+            logger.info(f"✅ Health check OK: {health_data}")
+            return health_data
+            
+        except Exception as e:
+            logger.error(f"❌ Health check failed: {e}")
+            if update and update.effective_chat:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"🔴 Помилка health check: {str(e)}"
+                )
+            return {"status": "unhealthy", "error": str(e)}
+
     async def stats_command(self, update, context):
         """Команда для перегляду статистики"""
         if update.effective_user.id != self.admin_id:
@@ -521,40 +656,71 @@ class AdvancedBobikBot:
         
         await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
+    async def create_http_server(self):
+        """Створює HTTP сервер для Railway"""
+        app = web.Application()
+        
+        # Додаємо маршрути
+        app.router.add_get('/health', self.health_endpoint)
+        app.router.add_get('/stats', self.stats_endpoint)
+        app.router.add_post('/post', self.manual_post_endpoint)
+        app.router.add_get('/', self.health_endpoint)  # Root endpoint
+        
+        logger.info(f"🌐 Запуск HTTP сервера на порті {PORT}")
+        
+        # Запускаємо сервер
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', PORT)
+        await site.start()
+        
+        logger.info(f"✅ HTTP сервер запущено на http://0.0.0.0:{PORT}")
+        return runner
+
     def main(self):
         """Головна функція запуску бота"""
         logger.info("🚀 Запуск Бобік 2.0...")
         
         # Створюємо додаток
-        app = Application.builder().token(self.bot_token).build()
-        self.bot = app.bot
+        self.telegram_app = Application.builder().token(self.bot_token).build()
+        self.bot = self.telegram_app.bot
         
         # Додаємо обробники команд
-        app.add_handler(CommandHandler("start", self.start_command))
-        app.add_handler(CommandHandler("stats", self.stats_command))
-        app.add_handler(CommandHandler("test", self.test_post_command))
-        app.add_handler(CommandHandler("health", self.health_check_handler))
+        self.telegram_app.add_handler(CommandHandler("start", self.start_command))
+        self.telegram_app.add_handler(CommandHandler("stats", self.stats_command))
+        self.telegram_app.add_handler(CommandHandler("test", self.test_post_command))
+        self.telegram_app.add_handler(CommandHandler("health", self.health_check_handler))
         
-        # Запускаємо автопублікування в окремому потоці
+        # Запускаємо бота та HTTP сервер
         async def start_bot():
-            # Запускаємо планувальник постів
-            posting_task = asyncio.create_task(self.scheduled_posting())
-            
-            # Запускаємо бота
-            await app.start()
-            await app.updater.start_polling()
-            
-            logger.info("🎉 Бобік 2.0 успішно запущений!")
-            logger.info(f"📱 Публікування в канал: {self.channel_id}")
-            logger.info(f"⏰ Розклад: {len(self.posting_schedule)} публікацій на день")
-            
-            # Чекаємо завершення
             try:
-                await posting_task
-            except KeyboardInterrupt:
-                logger.info("🛑 Отримано сигнал зупинки")
-            finally:
-                await app.stop()
+                # Запускаємо HTTP сервер для Railway
+                http_runner = await self.create_http_server()
+                
+                # Запускаємо планувальник постів
+                posting_task = asyncio.create_task(self.scheduled_posting())
+                
+                # Запускаємо Telegram бота
+                await self.telegram_app.start()
+                await self.telegram_app.updater.start_polling()
+                
+                logger.info("🎉 Бобік 2.0 успішно запущений!")
+                logger.info(f"📱 Публікування в канал: {self.channel_id}")
+                logger.info(f"⏰ Розклад: {len(self.posting_schedule)} публікацій на день")
+                logger.info(f"🌐 HTTP сервер доступний на порті {PORT}")
+                
+                # Чекаємо завершення
+                try:
+                    await posting_task
+                except KeyboardInterrupt:
+                    logger.info("🛑 Отримано сигнал зупинки")
+                finally:
+                    await self.telegram_app.stop()
+                    await http_runner.cleanup()
+                    
+            except Exception as e:
+                logger.error(f"❌ Помилка запуску: {e}")
+                raise
         
         # Запускаємо асинхронний код
         try:

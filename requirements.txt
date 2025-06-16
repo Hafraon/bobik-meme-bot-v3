@@ -2,11 +2,13 @@
 python-telegram-bot==21.0.1
 requests==2.31.0
 
+# HTTP сервер для Railway
+aiohttp==3.9.5
+
 # AI інтеграція (опціонально)
 openai==1.51.0
 
 # Додаткові утиліти
-aiohttp==3.9.5
 asyncio-throttle==1.0.2
 
 # Для роботи з JSON та часом
