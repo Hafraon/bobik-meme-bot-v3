@@ -92,37 +92,52 @@ class AdvancedBobikBot:
             "23:00"   # 01:00 Київ - Нічні сови 🦉
         ]
         
-        # Розумні API з fallback системою
+        # Розумні API з fallback системою - ОНОВЛЕНІ ДЖЕРЕЛА
         self.api_sources = [
             {
-                'name': 'Reddit Dank Memes',
-                'url': 'https://meme-api.herokuapp.com/gimme/dankmemes',
+                'name': 'Reddit Programming Humor',
+                'url': 'https://meme-api.com/gimme/ProgrammerHumor',
+                'weight': 4,
+                'ukrainian_friendly': True
+            },
+            {
+                'name': 'Reddit Dank Memes', 
+                'url': 'https://meme-api.com/gimme/dankmemes',
                 'weight': 3,
                 'ukrainian_friendly': True
             },
             {
-                'name': 'Reddit Programming Humor',
-                'url': 'https://meme-api.herokuapp.com/gimme/ProgrammerHumor',
-                'weight': 4,
-                'ukrainian_friendly': True  # IT аудиторія
-            },
-            {
-                'name': 'Reddit Wholesome Memes',
-                'url': 'https://meme-api.herokuapp.com/gimme/wholesomememes',
-                'weight': 2,
+                'name': 'Reddit Memes',
+                'url': 'https://meme-api.com/gimme/memes',
+                'weight': 3,
                 'ukrainian_friendly': True
             },
             {
                 'name': 'General Memes',
-                'url': 'https://meme-api.herokuapp.com/gimme',
+                'url': 'https://meme-api.com/gimme',
                 'weight': 2,
-                'ukrainian_friendly': False  # Потребує перевірки
+                'ukrainian_friendly': True
             },
             {
-                'name': 'Reddit Memes',
-                'url': 'https://meme-api.herokuapp.com/gimme/memes',
-                'weight': 3,
+                'name': 'ImgFlip Memes',
+                'url': 'https://api.imgflip.com/get_memes',
+                'weight': 2,
+                'ukrainian_friendly': True,
+                'format': 'imgflip'
+            },
+            {
+                'name': 'Reddit Wholesome Memes',
+                'url': 'https://meme-api.com/gimme/wholesomememes', 
+                'weight': 2,
                 'ukrainian_friendly': True
+            },
+            # Резервні джерела
+            {
+                'name': 'Backup API 1',
+                'url': 'https://api.memegen.link/images/trending',
+                'weight': 1,
+                'ukrainian_friendly': True,
+                'format': 'memegen'
             }
         ]
         
@@ -294,25 +309,21 @@ class AdvancedBobikBot:
     async def get_meme_from_api(self, source: dict) -> Optional[dict]:
         """Отримує мем з конкретного API джерела з обробкою помилок"""
         try:
-            logger.info(f"🔍 Запит до {source['name']}")
+            logger.info(f"🔍 Запит до {source['name']} - {source['url']}")
             
             async with ClientSession() as session:
                 async with session.get(source['url'], timeout=15) as response:
+                    logger.info(f"📡 Відповідь від {source['name']}: {response.status}")
+                    
                     if response.status == 200:
                         data = await response.json()
+                        logger.info(f"📄 Дані від {source['name']}: {str(data)[:200]}...")
                         
-                        # Перевіряємо чи це масив чи окремий об'єкт
-                        if isinstance(data, list) and len(data) > 0:
-                            meme_data = data[0]
-                        elif isinstance(data, dict):
-                            meme_data = data
-                        else:
-                            logger.warning(f"⚠️ Незрозумілий формат відповіді від {source['name']}")
-                            return None
+                        # Обробка різних форматів API
+                        meme_data = self.parse_api_response(data, source)
                         
-                        # Валідація даних мему
-                        if not all(key in meme_data for key in ['url', 'title']):
-                            logger.warning(f"⚠️ Неповні дані мему від {source['name']}")
+                        if not meme_data:
+                            logger.warning(f"⚠️ Не вдалося розпарсити відповідь від {source['name']}")
                             return None
                         
                         # Перевірка на дублікати
@@ -333,14 +344,75 @@ class AdvancedBobikBot:
                         
                         logger.info(f"✅ Отримано мем від {source['name']}: {meme_data['title'][:50]}...")
                         return meme_data
+                    else:
+                        logger.error(f"❌ HTTP {response.status} від {source['name']}")
                         
         except asyncio.TimeoutError:
             logger.warning(f"⏰ Таймаут для {source['name']}")
             self.stats['api_failures'][source['name']] = self.stats['api_failures'].get(source['name'], 0) + 1
         except Exception as e:
-            logger.error(f"❌ Помилка для {source['name']}: {e}")
+            logger.error(f"❌ Помилка для {source['name']}: {str(e)}")
             self.stats['api_failures'][source['name']] = self.stats['api_failures'].get(source['name'], 0) + 1
         
+        return None
+
+    def parse_api_response(self, data: dict, source: dict) -> Optional[dict]:
+        """Парсить відповідь API залежно від формату"""
+        try:
+            api_format = source.get('format', 'reddit')
+            
+            if api_format == 'imgflip':
+                # ImgFlip API format
+                if 'data' in data and 'memes' in data['data']:
+                    memes = data['data']['memes']
+                    if memes:
+                        meme = random.choice(memes[:10])  # Топ 10 мемів
+                        return {
+                            'url': meme['url'],
+                            'title': meme['name'],
+                            'author': 'ImgFlip'
+                        }
+                        
+            elif api_format == 'memegen':
+                # MemeGen API format
+                if isinstance(data, list) and data:
+                    meme = random.choice(data[:10])
+                    return {
+                        'url': meme['url'],
+                        'title': meme.get('template', {}).get('name', 'Trending Meme'),
+                        'author': 'MemeGen'
+                    }
+                    
+            else:
+                # Reddit API format (default)
+                if isinstance(data, list) and len(data) > 0:
+                    meme_data = data[0]
+                elif isinstance(data, dict):
+                    meme_data = data
+                else:
+                    return None
+                
+                # Валідація даних мему
+                if not all(key in meme_data for key in ['url', 'title']):
+                    # Спробуємо альтернативні поля
+                    url = meme_data.get('url') or meme_data.get('image') or meme_data.get('link')
+                    title = meme_data.get('title') or meme_data.get('name') or 'Untitled Meme'
+                    
+                    if not url:
+                        return None
+                        
+                    return {
+                        'url': url,
+                        'title': title,
+                        'author': meme_data.get('author', 'Reddit')
+                    }
+                else:
+                    return meme_data
+                    
+        except Exception as e:
+            logger.error(f"❌ Помилка парсингу API відповіді: {e}")
+            return None
+            
         return None
 
     async def get_smart_meme(self) -> Optional[dict]:
@@ -366,7 +438,50 @@ class AdvancedBobikBot:
             await asyncio.sleep(1)
         
         logger.error("❌ Не вдалося отримати мем з жодного джерела")
-        return None
+        
+        # FALLBACK - якщо всі API не працюють, використовуємо резервний мем
+        return await self.get_fallback_meme()
+
+    async def get_fallback_meme(self) -> dict:
+        """Резервний мем якщо всі API не працюють"""
+        fallback_memes = [
+            {
+                'url': 'https://i.imgflip.com/1bij.jpg',
+                'title': 'Коли всі API не працюють, але бот все одно має щось постити 😅',
+                'source': 'Fallback',
+                'author': 'BobikBot',
+                'hash': 'fallback_1',
+                'ukrainian_friendly': True,
+                'localized': True
+            },
+            {
+                'url': 'https://i.imgflip.com/30b1gx.jpg',
+                'title': 'Програміст намагається зафіксити API третій день поспіль 🔧',
+                'source': 'Fallback',
+                'author': 'BobikBot', 
+                'hash': 'fallback_2',
+                'ukrainian_friendly': True,
+                'localized': True
+            },
+            {
+                'url': 'https://i.imgflip.com/1g8my4.jpg',
+                'title': 'Коли код працює в localhost, але не працює на продакшині 🤷‍♂️',
+                'source': 'Fallback',
+                'author': 'BobikBot',
+                'hash': 'fallback_3', 
+                'ukrainian_friendly': True,
+                'localized': True
+            }
+        ]
+        
+        # Вибираємо випадковий fallback мем
+        meme = random.choice(fallback_memes)
+        
+        # Додаємо часову мітку щоб уникнути дублікатів
+        meme['hash'] = f"{meme['hash']}_{int(time.time())}"
+        
+        logger.info(f"🔄 Використовуємо fallback мем: {meme['title'][:50]}...")
+        return meme
 
     def get_time_context(self) -> str:
         """Визначає контекст часу для українських підписів"""
@@ -612,6 +727,28 @@ class AdvancedBobikBot:
         
         await update.message.reply_text(stats_text, parse_mode='Markdown')
 
+    async def test_api_sources(self):
+        """Тестує всі API джерела при запуску"""
+        logger.info("🧪 Тестування API джерел...")
+        
+        working_sources = 0
+        for source in self.api_sources:
+            try:
+                async with ClientSession() as session:
+                    async with session.get(source['url'], timeout=10) as response:
+                        if response.status == 200:
+                            logger.info(f"✅ {source['name']}: працює")
+                            working_sources += 1
+                        else:
+                            logger.warning(f"⚠️ {source['name']}: HTTP {response.status}")
+            except Exception as e:
+                logger.error(f"❌ {source['name']}: {str(e)[:100]}")
+        
+        logger.info(f"📊 Працюючих API: {working_sources}/{len(self.api_sources)}")
+        
+        if working_sources == 0:
+            logger.warning("⚠️ Жодне API не працює! Будемо використовувати fallback меми.")
+        
     async def test_post_command(self, update, context):
         """Команда для тестової публікації"""
         if update.effective_user.id != self.admin_id:
@@ -626,11 +763,44 @@ class AdvancedBobikBot:
             success = await self.post_meme_to_channel(meme)
             
             if success:
-                await update.message.reply_text("✅ Тестовий пост опублікований!")
+                await update.message.reply_text(f"✅ Тестовий пост опублікований!\n🔗 Джерело: {meme.get('source', 'N/A')}")
             else:
                 await update.message.reply_text("❌ Помилка публікації тестового поста")
         else:
             await update.message.reply_text("❌ Не вдалося отримати мем для тесту")
+
+    async def api_status_command(self, update, context):
+        """Команда для перевірки статусу API джерел"""
+        if update.effective_user.id != self.admin_id:
+            await update.message.reply_text("❌ Немає доступу")
+            return
+        
+        await update.message.reply_text("🔍 Перевіряю API джерела...")
+        
+        status_text = "📡 **Статус API джерел:**\n\n"
+        working_count = 0
+        
+        for source in self.api_sources:
+            try:
+                async with ClientSession() as session:
+                    async with session.get(source['url'], timeout=10) as response:
+                        if response.status == 200:
+                            status_text += f"✅ **{source['name']}**: працює\n"
+                            working_count += 1
+                        else:
+                            status_text += f"⚠️ **{source['name']}**: HTTP {response.status}\n"
+            except Exception as e:
+                status_text += f"❌ **{source['name']}**: {str(e)[:50]}...\n"
+        
+        status_text += f"\n📊 **Підсумок:** {working_count}/{len(self.api_sources)} API працюють"
+        
+        # Статистика відмов
+        if self.stats['api_failures']:
+            status_text += "\n\n🚨 **Статистика відмов:**\n"
+            for api, failures in sorted(self.stats['api_failures'].items(), key=lambda x: x[1], reverse=True):
+                status_text += f"• {api}: {failures} відмов\n"
+        
+        await update.message.reply_text(status_text, parse_mode='Markdown')
 
     async def start_command(self, update, context):
         """Команда /start"""
@@ -652,7 +822,7 @@ class AdvancedBobikBot:
         """
         
         if update.effective_user.id == self.admin_id:
-            welcome_text += "\n\n🔧 **Адмін команди:**\n/stats - статистика\n/test - тестовий пост\n/health - статус бота"
+            welcome_text += "\n\n🔧 **Адмін команди:**\n/stats - статистика\n/test - тестовий пост\n/health - статус бота\n/apis - статус API джерел"
         
         await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
@@ -690,6 +860,7 @@ class AdvancedBobikBot:
         self.telegram_app.add_handler(CommandHandler("stats", self.stats_command))
         self.telegram_app.add_handler(CommandHandler("test", self.test_post_command))
         self.telegram_app.add_handler(CommandHandler("health", self.health_check_handler))
+        self.telegram_app.add_handler(CommandHandler("apis", self.api_status_command))
         
         # Запускаємо бота та HTTP сервер
         async def start_bot():
@@ -708,6 +879,10 @@ class AdvancedBobikBot:
                 logger.info(f"📱 Публікування в канал: {self.channel_id}")
                 logger.info(f"⏰ Розклад: {len(self.posting_schedule)} публікацій на день")
                 logger.info(f"🌐 HTTP сервер доступний на порті {PORT}")
+                logger.info(f"🔗 API джерел: {len(self.api_sources)} активних")
+                
+                # Тестуємо API джерела при запуску
+                await self.test_api_sources()
                 
                 # Запускаємо планувальник постів ПІСЛЯ успішного запуску бота
                 posting_task = asyncio.create_task(self.scheduled_posting())
