@@ -1,0 +1,42 @@
+# 🧠😂🔥 Railway конфігурація для україномовного бота 🧠😂🔥
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "pip install -r requirements.txt"
+
+[deploy]
+startCommand = "python main.py"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[env]
+PYTHONPATH = "/app"
+PYTHONDONTWRITEBYTECODE = "1"
+PYTHONUNBUFFERED = "1"
+
+# Часова зона
+TZ = "Europe/Kiev"
+
+# Порт для health check (якщо буде потрібен)
+PORT = "8080"
+
+[healthcheck]
+# Не потрібний для Telegram бота, але можна додати
+path = "/health"
+interval = 30
+timeout = 10
+retries = 3
+
+[services.web]
+# Основний сервіс бота
+build = { }
+deploy = { }
+
+[services.postgres]
+# PostgreSQL буде додано автоматично через Railway UI
+type = "postgresql"
+
+[services.redis]
+# Redis можна додати пізніше для кешування
+type = "redis"
+optional = true

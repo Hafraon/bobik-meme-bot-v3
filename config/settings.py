@@ -1,40 +1,49 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Налаштування проекту Бобік 2.0
+🧠😂🔥 Реєстрація всіх хендлерів україномовного бота 🧠😂🔥
 """
 
-import os
-from typing import Optional
+import logging
+from aiogram import Dispatcher
 
-class Settings:
-    """Клас налаштувань бота"""
+# Імпорт всіх модулів хендлерів
+from .basic_commands import register_basic_handlers
+from .content_handlers import register_content_handlers  
+from .gamification_handlers import register_gamification_handlers
+from .moderation_handlers import register_moderation_handlers
+from .duel_handlers import register_duel_handlers
+
+logger = logging.getLogger(__name__)
+
+def register_handlers(dp: Dispatcher):
+    """Реєстрація всіх хендлерів бота"""
     
-    def __init__(self):
-        # Основні налаштування
-        self.BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-        self.CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@BobikFun")
+    try:
+        logger.info("📝 Початок реєстрації хендлерів...")
         
-        # AI налаштування
-        self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-        self.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+        # 1. Основні команди (start, help, stats)
+        register_basic_handlers(dp)
+        logger.info("✅ Основні команди зареєстровано")
         
-        # Часові налаштування
-        self.TIMEZONE = os.getenv("TIMEZONE", "Europe/Kiev")
-        self.POSTS_PER_DAY = int(os.getenv("POSTS_PER_DAY", "11"))
+        # 2. Контент (meme, anekdot, submit)
+        register_content_handlers(dp)
+        logger.info("✅ Контент хендлери зареєстровано")
         
-        # Логування
-        self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+        # 3. Гейміфікація (profile, top, daily)
+        register_gamification_handlers(dp)
+        logger.info("✅ Гейміфікація зареєстровано")
         
-        # Валідація
-        self._validate()
-    
-    def _validate(self):
-        """Валідація обов'язкових налаштувань"""
-        if not self.BOT_TOKEN:
-            raise ValueError("⚠️ TELEGRAM_BOT_TOKEN потрібен для роботи бота")
+        # 4. Модерація (approve, reject, admin)
+        register_moderation_handlers(dp)
+        logger.info("✅ Модерація зареєстровано")
         
-        if not self.CHANNEL_ID:
-            raise ValueError("⚠️ TELEGRAM_CHANNEL_ID потрібен для публікацій")
+        # 5. Дуелі (duel, voting)
+        register_duel_handlers(dp)
+        logger.info("✅ Дуелі зареєстровано")
         
-        print(f"✅ Налаштування завантажено для каналу: {self.CHANNEL_ID}")
+        logger.info("🎉 Всі хендлери успішно зареєстровано!")
+        
+    except Exception as e:
+        logger.error(f"❌ Помилка реєстрації хендлерів: {e}")
+        raise
