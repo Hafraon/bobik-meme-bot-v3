@@ -1,83 +1,82 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Реєстрація хендлерів україномовного бота 🧠😂🔥
+🧠😂🔥 Реєстрація всіх хендлерів бота 🧠😂🔥
 """
 
 import logging
 from aiogram import Dispatcher
-from aiogram.filters import Command
-from aiogram.types import Message
-
-from config.settings import EMOJI, TEXTS
 
 logger = logging.getLogger(__name__)
 
-async def cmd_start(message: Message):
-    """Базова команда /start"""
-    await message.answer(TEXTS["start"])
-    logger.info(f"🧠 Користувач {message.from_user.id} запустив бота")
-
-async def cmd_help(message: Message):
-    """Базова команда /help"""
-    await message.answer(TEXTS["help"])
-    logger.info(f"😂 Користувач {message.from_user.id} подивився довідку")
-
-async def cmd_test(message: Message):
-    """Тестова команда для перевірки роботи"""
-    await message.answer(
-        f"{EMOJI['fire']} <b>Бот працює!</b>\n\n"
-        f"{EMOJI['brain']} Тестова команда виконана успішно\n"
-        f"{EMOJI['rocket']} Всі системи в нормі!"
-    )
-    logger.info(f"🔥 Користувач {message.from_user.id} виконав тест")
-
 def register_handlers(dp: Dispatcher):
-    """Реєстрація базових хендлерів"""
-    try:
-        # Основні команди
-        dp.message.register(cmd_start, Command("start"))
-        dp.message.register(cmd_help, Command("help"))
-        dp.message.register(cmd_test, Command("test"))
-        
-        logger.info(f"{EMOJI['check']} Базові хендлери зареєстровано")
-        
-        # Спроба реєстрації додаткових хендлерів
+    """Реєстрація всіх хендлерів з обробкою помилок"""
+    
+    handlers_to_register = [
+        ("basic_commands", "register_basic_handlers", "Основні команди"),
+        ("content_handlers", "register_content_handlers", "Контент хендлери"),
+        ("gamification_handlers", "register_gamification_handlers", "Гейміфікація"),
+        ("moderation_handlers", "register_moderation_handlers", "Модерація"),
+        ("duel_handlers", "register_duel_handlers", "Дуелі")
+    ]
+    
+    registered_count = 0
+    
+    for module_name, func_name, description in handlers_to_register:
         try:
-            from .basic_commands import register_basic_handlers
-            register_basic_handlers(dp)
-            logger.info(f"{EMOJI['check']} Основні хендлери зареєстровано")
-        except ImportError as e:
-            logger.warning(f"{EMOJI['warning']} Основні хендлери недоступні: {e}")
-        
-        try:
-            from .content_handlers import register_content_handlers
-            register_content_handlers(dp)
-            logger.info(f"{EMOJI['check']} Контент хендлери зареєстровано")
-        except ImportError as e:
-            logger.warning(f"{EMOJI['warning']} Контент хендлери недоступні: {e}")
-        
-        try:
-            from .gamification_handlers import register_gamification_handlers
-            register_gamification_handlers(dp)
-            logger.info(f"{EMOJI['check']} Гейміфікація хендлери зареєстровано")
-        except ImportError as e:
-            logger.warning(f"{EMOJI['warning']} Гейміфікація хендлери недоступні: {e}")
-        
-        try:
-            from .moderation_handlers import register_moderation_handlers
-            register_moderation_handlers(dp)
-            logger.info(f"{EMOJI['check']} Модерація хендлери зареєстровано")
-        except ImportError as e:
-            logger.warning(f"{EMOJI['warning']} Модерація хендлери недоступні: {e}")
-        
-        try:
-            from .duel_handlers import register_duel_handlers
-            register_duel_handlers(dp)
-            logger.info(f"{EMOJI['check']} Дуель хендлери зареєстровано")
-        except ImportError as e:
-            logger.warning(f"{EMOJI['warning']} Дуель хендлери недоступні: {e}")
+            # Динамічний імпорт модулю
+            module = __import__(f"handlers.{module_name}", fromlist=[func_name])
+            register_func = getattr(module, func_name)
             
-    except Exception as e:
-        logger.error(f"{EMOJI['cross']} Помилка реєстрації хендлерів: {e}")
-        # Продовжуємо з базовими хендлерами
+            # Реєстрація хендлерів
+            register_func(dp)
+            logger.info(f"✅ {description} - зареєстровано")
+            registered_count += 1
+            
+        except ImportError as e:
+            logger.warning(f"⚠️ Не вдалося імпортувати {module_name}: {e}")
+        except AttributeError as e:
+            logger.warning(f"⚠️ Функція {func_name} не знайдена в {module_name}: {e}")
+        except Exception as e:
+            logger.error(f"❌ Помилка реєстрації {description}: {e}")
+    
+    logger.info(f"🎯 Зареєстровано {registered_count}/{len(handlers_to_register)} груп хендлерів")
+    
+    if registered_count == 0:
+        logger.warning("⚠️ Жодних хендлерів не зареєстровано!")
+        # Реєструємо базовий хендлер як fallback
+        register_fallback_handlers(dp)
+
+def register_fallback_handlers(dp: Dispatcher):
+    """Реєстрація базових хендлерів як fallback"""
+    from aiogram import F
+    from aiogram.filters import Command
+    from aiogram.types import Message
+    
+    @dp.message(Command("start"))
+    async def cmd_start_fallback(message: Message):
+        await message.answer(
+            "🧠😂🔥 <b>Вітаю в україномовному боті!</b>\n\n"
+            "⚠️ Бот запущено в базовому режимі\n"
+            "🔧 Деякі функції можуть бути недоступні\n\n"
+            "📞 Зверніться до адміністратора для налаштування"
+        )
+    
+    @dp.message(Command("help"))
+    async def cmd_help_fallback(message: Message):
+        await message.answer(
+            "❓ <b>Довідка</b>\n\n"
+            "Доступні команди:\n"
+            "• /start - запуск бота\n"
+            "• /help - ця довідка\n\n"
+            "🔧 Для повного функціоналу потрібно налаштувати всі модулі"
+        )
+    
+    @dp.message(F.text)
+    async def fallback_handler(message: Message):
+        await message.answer(
+            "🤔 Не розумію цю команду\n"
+            "Використай /help для допомоги"
+        )
+    
+    logger.info("🔧 Fallback хендлери зареєстровано")

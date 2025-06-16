@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Конфігурація україномовного Telegram-бота 🧠😂🔥
+🧠😂🔥 Конфігурація україномовного бота 🧠😂🔥
 """
 
 import os
@@ -12,26 +12,34 @@ from typing import Optional
 class Settings:
     """Налаштування бота"""
     
-    # Telegram Bot API
+    # ===== ОСНОВНІ НАЛАШТУВАННЯ TELEGRAM =====
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
     ADMIN_ID: int = int(os.getenv("ADMIN_ID", "0"))
+    CHANNEL_ID: str = os.getenv("CHANNEL_ID", "")  # Для публікацій (якщо потрібно)
     
-    # Канал для публікацій
-    CHANNEL_ID: str = os.getenv("CHANNEL_ID", "")
-    
-    # База даних
+    # ===== БАЗА ДАНИХ =====
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///ukrainian_bot.db")
     
-    # OpenAI API (опціонально для генерації контенту)
+    # ===== AI НАЛАШТУВАННЯ =====
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
     
-    # Налаштування гейміфікації
+    # ===== СЕРЕДОВИЩЕ ТА ЛОГУВАННЯ =====
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    TIMEZONE: str = os.getenv("TIMEZONE", "Europe/Kiev")
+    
+    # ===== ВЕБ-СЕРВЕР =====
+    PORT: int = int(os.getenv("PORT", "8000"))
+    
+    # ===== НАЛАШТУВАННЯ ГЕЙМІФІКАЦІЇ =====
     POINTS_FOR_REACTION: int = int(os.getenv("POINTS_FOR_REACTION", "5"))
     POINTS_FOR_SUBMISSION: int = int(os.getenv("POINTS_FOR_SUBMISSION", "10"))
     POINTS_FOR_APPROVAL: int = int(os.getenv("POINTS_FOR_APPROVAL", "20"))
     POINTS_FOR_TOP_JOKE: int = int(os.getenv("POINTS_FOR_TOP_JOKE", "50"))
     
-    # Ранги користувачів
+    # ===== РАНГИ КОРИСТУВАЧІВ =====
     RANKS = {
         0: "🤡 Новачок",
         50: "😄 Сміхун",
@@ -43,42 +51,61 @@ class Settings:
         5000: "🚀 Гумористичний Геній"
     }
     
-    # Налаштування модерації
+    # ===== НАЛАШТУВАННЯ МОДЕРАЦІЇ =====
     MAX_PENDING_SUBMISSIONS: int = int(os.getenv("MAX_PENDING_SUBMISSIONS", "100"))
     AUTO_APPROVE_THRESHOLD: int = int(os.getenv("AUTO_APPROVE_THRESHOLD", "1000"))
     
-    # Час для щоденної розсилки
+    # ===== ЩОДЕННА РОЗСИЛКА =====
     DAILY_BROADCAST_HOUR: int = int(os.getenv("DAILY_BROADCAST_HOUR", "9"))
     DAILY_BROADCAST_MINUTE: int = int(os.getenv("DAILY_BROADCAST_MINUTE", "0"))
     
-    # Максимальна довжина тексту
+    # ===== ОБМЕЖЕННЯ КОНТЕНТУ =====
     MAX_JOKE_LENGTH: int = int(os.getenv("MAX_JOKE_LENGTH", "1000"))
     MAX_MEME_CAPTION_LENGTH: int = int(os.getenv("MAX_MEME_CAPTION_LENGTH", "200"))
     
-    # Налаштування дуелей
+    # ===== НАЛАШТУВАННЯ ДУЕЛЕЙ =====
     DUEL_VOTING_TIME: int = int(os.getenv("DUEL_VOTING_TIME", "300"))  # 5 хвилин
     MIN_VOTES_FOR_DUEL: int = int(os.getenv("MIN_VOTES_FOR_DUEL", "3"))
     
-    # Логування
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    
-    # Веб-сервер (для Railway)
-    PORT: int = int(os.getenv("PORT", "8000"))
-    
-    # Режим розробки
-    DEBUG: bool = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")
+    # ===== БЕЗПЕКА ТА RATE LIMITING =====
+    RATE_LIMIT_MESSAGES: int = int(os.getenv("RATE_LIMIT_MESSAGES", "3"))
+    RATE_LIMIT_CALLBACKS: int = int(os.getenv("RATE_LIMIT_CALLBACKS", "5"))
     
     def __post_init__(self):
-        """Валідація налаштувань"""
+        """Валідація налаштувань після ініціалізації"""
+        errors = []
+        
+        # Перевірка обов'язкових параметрів
         if not self.BOT_TOKEN:
-            raise ValueError("❌ BOT_TOKEN не може бути порожнім")
+            errors.append("BOT_TOKEN не може бути порожнім")
         if not self.ADMIN_ID:
-            raise ValueError("❌ ADMIN_ID не може бути 0")
+            errors.append("ADMIN_ID не може бути 0")
+        if not self.DATABASE_URL:
+            errors.append("DATABASE_URL не може бути порожнім")
+        
+        # Перевірка валідності часу розсилки
+        if not (0 <= self.DAILY_BROADCAST_HOUR <= 23):
+            errors.append("DAILY_BROADCAST_HOUR має бути від 0 до 23")
+        if not (0 <= self.DAILY_BROADCAST_MINUTE <= 59):
+            errors.append("DAILY_BROADCAST_MINUTE має бути від 0 до 59")
+        
+        if errors:
+            raise ValueError("Помилки конфігурації:\n" + "\n".join(f"- {error}" for error in errors))
+    
+    @property
+    def is_production(self) -> bool:
+        """Чи працює бот у production режимі"""
+        return self.ENVIRONMENT.lower() == "production"
+    
+    @property
+    def is_development(self) -> bool:
+        """Чи працює бот у development режимі"""
+        return self.ENVIRONMENT.lower() == "development"
 
 # Створення глобального екземпляру налаштувань
 settings = Settings()
 
-# Емодзі для різних функцій
+# ===== ЕМОДЗІ ДЛЯ ІНТЕРФЕЙСУ =====
 EMOJI = {
     "brain": "🧠",
     "laugh": "😂", 
@@ -107,12 +134,10 @@ EMOJI = {
     "stats": "📊",
     "profile": "👤",
     "settings": "⚙️",
-    "help": "❓",
-    "hand": "✋",
-    "test": "🧪"
+    "help": "❓"
 }
 
-# Тексти привітань та інформації
+# ===== ТЕКСТИ ІНТЕРФЕЙСУ =====
 TEXTS = {
     "start": (
         f"{EMOJI['brain']}{EMOJI['laugh']}{EMOJI['fire']} <b>Вітаю в україномовному боті мемів та анекдотів!</b>\n\n"
@@ -140,10 +165,10 @@ TEXTS = {
         f"• /top - таблиця лідерів\n"
         f"• /duel - започаткувати дуель жартів\n\n"
         f"{EMOJI['star']} <b>БАЛИ ЗА АКТИВНІСТЬ:</b>\n"
-        f"• +5 балів - за реакцію на мем\n"
-        f"• +10 балів - за надісланий жарт\n"
-        f"• +20 балів - якщо жарт схвалено\n"
-        f"• +50 балів - якщо жарт потрапив до ТОПу\n\n"
+        f"• +{settings.POINTS_FOR_REACTION} балів - за реакцію на мем\n"
+        f"• +{settings.POINTS_FOR_SUBMISSION} балів - за надісланий жарт\n"
+        f"• +{settings.POINTS_FOR_APPROVAL} балів - якщо жарт схвалено\n"
+        f"• +{settings.POINTS_FOR_TOP_JOKE} балів - якщо жарт потрапив до ТОПу\n\n"
         f"{EMOJI['rocket']} <b>Дякуємо за використання бота!</b>"
     ),
     
@@ -169,10 +194,26 @@ TEXTS = {
     )
 }
 
-# Привітання залежно від часу дня
+# ===== КОНТЕКСТНІ ПРИВІТАННЯ =====
 TIME_GREETINGS = {
-    "morning": [f"{EMOJI['fire']} Доброго ранку!", f"{EMOJI['brain']} Ранковий заряд гумору!"],
-    "day": [f"{EMOJI['laugh']} Гарного дня!", f"{EMOJI['star']} Денний мем для настрою!"], 
-    "evening": [f"{EMOJI['cool']} Доброго вечора!", f"{EMOJI['party']} Вечірній релакс з гумором!"],
-    "night": [f"{EMOJI['wink']} Доброї ночі!", f"{EMOJI['thinking']} Нічний жарт для сну!"]
+    "morning": [
+        f"{EMOJI['fire']} Доброго ранку!", 
+        f"{EMOJI['brain']} Ранковий заряд гумору!",
+        f"{EMOJI['star']} Доброго ранку! Починаємо день з посмішки!"
+    ],
+    "day": [
+        f"{EMOJI['laugh']} Гарного дня!", 
+        f"{EMOJI['star']} Денний мем для настрою!",
+        f"{EMOJI['cool']} Приємного дня з гумором!"
+    ], 
+    "evening": [
+        f"{EMOJI['cool']} Доброго вечора!", 
+        f"{EMOJI['party']} Вечірній релакс з гумором!",
+        f"{EMOJI['wink']} Доброго вечора! Час розслабитися!"
+    ],
+    "night": [
+        f"{EMOJI['wink']} Доброї ночі!", 
+        f"{EMOJI['thinking']} Нічний жарт для сну!",
+        f"{EMOJI['heart']} Солодких снів з гумором!"
+    ]
 }
