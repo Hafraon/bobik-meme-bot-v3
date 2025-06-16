@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Повна конфігурація україномовного бота 🧠😂🔥
+🧠😂🔥 Конфігурація україномовного бота 🧠😂🔥
 """
 
 import os
-from typing import Optional, Dict
+from typing import Optional
 
 class Settings:
     """Клас налаштувань бота"""
     
     def __init__(self):
         # ===============================
-        # ОСНОВНІ НАЛАШТУВАННЯ
+        # ОСНОВНІ НАЛАШТУВАННЯ (Railway)
         # ===============================
         self.BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-        self.ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+        self.ADMIN_ID = int(os.getenv("ADMIN_ID", "603047391"))  # Твій ID
+        self.CHANNEL_ID = os.getenv("CHANNEL_ID", "1002889574159")
         
         # ===============================
-        # БАЗА ДАНИХ
+        # БАЗА ДАНИХ (Railway PostgreSQL)
         # ===============================
         self.DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///ukrainian_bot.db")
         
@@ -70,17 +71,13 @@ class Settings:
         self.MIN_VOTES_FOR_DUEL = int(os.getenv("MIN_VOTES_FOR_DUEL", "3"))
         
         # ===============================
-        # ДОДАТКОВІ НАЛАШТУВАННЯ
+        # RAILWAY НАЛАШТУВАННЯ
         # ===============================
         self.DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+        self.ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         self.TIMEZONE = os.getenv("TIMEZONE", "Europe/Kiev")
-        
-        # ===============================
-        # БЕЗПЕКА ТА АНТИ-СПАМ
-        # ===============================
-        self.RATE_LIMIT_MESSAGES = int(os.getenv("RATE_LIMIT_MESSAGES", "3"))
-        self.RATE_LIMIT_CALLBACKS = int(os.getenv("RATE_LIMIT_CALLBACKS", "5"))
+        self.PORT = int(os.getenv("PORT", "8000"))
         
         # Валідація
         self._validate()
@@ -88,13 +85,16 @@ class Settings:
     def _validate(self):
         """Валідація налаштувань"""
         if not self.BOT_TOKEN:
-            raise ValueError("❌ BOT_TOKEN не може бути порожнім! Додайте токен до .env файлу")
+            raise ValueError("❌ BOT_TOKEN не може бути порожнім!")
         if not self.ADMIN_ID:
-            raise ValueError("❌ ADMIN_ID не може бути 0! Додайте ваш Telegram ID до .env файлу")
+            raise ValueError("❌ ADMIN_ID не може бути 0!")
         
         print(f"✅ Налаштування завантажено")
         print(f"🤖 Бот токен: {self.BOT_TOKEN[:10]}...")
         print(f"👤 Адміністратор: {self.ADMIN_ID}")
+        print(f"📺 Канал: {self.CHANNEL_ID}")
+        print(f"🌍 Середовище: {self.ENVIRONMENT}")
+        print(f"🔍 Debug: {self.DEBUG}")
         if self.OPENAI_API_KEY:
             print(f"🧠 AI активний: {self.OPENAI_MODEL}")
         else:
@@ -198,42 +198,6 @@ TEXTS = {
         f"{EMOJI['cross']} <b>Твій жарт не пройшов модерацію</b>\n\n"
         f"{EMOJI['thinking']} Можливо, він не відповідає правилам або вже є в базі\n"
         f"{EMOJI['heart']} Спробуй надіслати інший!"
-    ),
-    
-    "daily_enabled": (
-        f"{EMOJI['check']} <b>Щоденну розсилку увімкнено!</b>\n\n"
-        f"{EMOJI['calendar']} Щодня о {settings.DAILY_BROADCAST_HOUR}:00 ти отримуватимеш:\n"
-        f"{EMOJI['brain']} Найкращий анекдот дня\n"
-        f"{EMOJI['laugh']} Топовий мем\n"
-        f"{EMOJI['fire']} Мотиваційне повідомлення\n\n"
-        f"{EMOJI['star']} За щоденну активність: +2 бали!"
-    ),
-    
-    "daily_disabled": (
-        f"{EMOJI['cross']} <b>Щоденну розсилку вимкнено</b>\n\n"
-        f"{EMOJI['thinking']} Ти завжди можеш увімкнути її знову через /daily"
-    ),
-    
-    "rate_limit": f"{EMOJI['warning']} Забагато запитів! Зачекай трохи перед наступною командою.",
-    
-    "premium_info": (
-        f"{EMOJI['gem']} <b>ПРЕМІУМ ПІДПИСКА</b>\n\n"
-        f"{EMOJI['star']} Що входить:\n"
-        f"• Ексклюзивні меми\n"
-        f"• Пріоритет в дуелях\n" 
-        f"• Додаткові бали\n"
-        f"• Без обмежень\n\n"
-        f"{EMOJI['money']} Вартість: $2.99/міс\n"
-        f"{EMOJI['info']} Зв'яжіться з адміністратором"
-    ),
-    
-    "support_info": (
-        f"{EMOJI['heart']} <b>ПІДТРИМКА ПРОЕКТУ</b>\n\n"
-        f"{EMOJI['star']} Допоможи розвитку бота:\n"
-        f"{EMOJI['money']} Monobank: 5375 4141 xxxx xxxx\n"
-        f"{EMOJI['money']} PrivatBank: 5168 7554 xxxx xxxx\n"
-        f"{EMOJI['link']} PayPal: donate@example.com\n\n"
-        f"{EMOJI['gift']} За донат від $5 - спеціальний ранг!"
     )
 }
 
