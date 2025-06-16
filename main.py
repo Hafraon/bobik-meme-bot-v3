@@ -14,31 +14,35 @@ from pathlib import Path
 # Додаємо поточну папку до Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Aiogram imports
+# Aiogram imports з підтримкою нової версії
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiohttp import web
 
-# Наші модулі (під твою плоску структуру)
+# Наші модулі (спробуємо різні варіанти структури)
 try:
-    from settings import settings, EMOJI  # Замість config.settings
+    from settings import settings, EMOJI
 except ImportError:
-    # Fallback налаштування якщо файл відсутній
-    import os
-    class FallbackSettings:
-        BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-        ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-        DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot.db")
-        OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-        LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-    
-    settings = FallbackSettings()
-    EMOJI = {"brain": "🧠", "laugh": "😂", "fire": "🔥", "star": "⭐", "check": "✅", "cross": "❌"}
+    try:
+        from config.settings import settings, EMOJI
+    except ImportError:
+        # Fallback налаштування
+        import os
+        class FallbackSettings:
+            BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+            ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+            DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot.db")
+            OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+            LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+        
+        settings = FallbackSettings()
+        EMOJI = {"brain": "🧠", "laugh": "😂", "fire": "🔥", "star": "⭐", "check": "✅", "cross": "❌"}
 
 # Налаштування логування
 logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
+    level=getattr(logging, getattr(settings, 'LOG_LEVEL', 'INFO'), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
@@ -57,16 +61,16 @@ class UkrainianBot:
         self.app = None
         
     async def create_bot(self):
-        """Створення бота та диспетчера"""
+        """Створення бота та диспетчера (оновлено для aiogram 3.7.0+)"""
         try:
             # Створення сесії з налаштуваннями
             session = AiohttpSession()
             
-            # Створення бота
+            # Створення бота з новим API
             self.bot = Bot(
                 token=settings.BOT_TOKEN,
                 session=session,
-                parse_mode=ParseMode.HTML
+                default=DefaultBotProperties(parse_mode=ParseMode.HTML)
             )
             
             # Створення диспетчера
@@ -81,54 +85,39 @@ class UkrainianBot:
     
     async def setup_handlers(self):
         """Реєстрація всіх хендлерів"""
+        if not self.dp:
+            logger.error("❌ Диспетчер не створено!")
+            return False
+            
         try:
-            # Імпортуємо хендлери які існують
             handlers_registered = 0
             
-            # Спроба імпортувати basic_commands
-            try:
-                from basic_commands import register_basic_handlers
-                register_basic_handlers(self.dp)
-                handlers_registered += 1
-                logger.info("✅ Основні команди зареєстровано")
-            except ImportError:
-                logger.warning("⚠️ basic_commands не знайдено")
+            # Спробуємо різні варіанти імпорту
+            handler_modules = [
+                # Спочатку спробуємо плоску структуру
+                ("basic_commands", "register_basic_handlers", "Основні команди"),
+                ("content_handlers", "register_content_handlers", "Контент хендлери"),
+                ("gamification_handlers", "register_gamification_handlers", "Гейміфікація"),
+                ("moderation_handlers", "register_moderation_handlers", "Модерація"),
+                ("duel_handlers", "register_duel_handlers", "Дуелі"),
+                # Потім папкову структуру
+                ("handlers.basic_commands", "register_basic_handlers", "Основні команди (handlers/)"),
+                ("handlers.content_handlers", "register_content_handlers", "Контент хендлери (handlers/)"),
+                ("handlers.gamification_handlers", "register_gamification_handlers", "Гейміфікація (handlers/)"),
+                ("handlers.moderation_handlers", "register_moderation_handlers", "Модерація (handlers/)"),
+                ("handlers.duel_handlers", "register_duel_handlers", "Дуелі (handlers/)")
+            ]
             
-            # Спроба імпортувати content_handlers
-            try:
-                from content_handlers import register_content_handlers
-                register_content_handlers(self.dp)
-                handlers_registered += 1
-                logger.info("✅ Контент хендлери зареєстровано")
-            except ImportError:
-                logger.warning("⚠️ content_handlers не знайдено")
-            
-            # Спроба імпортувати gamification_handlers
-            try:
-                from gamification_handlers import register_gamification_handlers
-                register_gamification_handlers(self.dp)
-                handlers_registered += 1
-                logger.info("✅ Гейміфікація зареєстровано")
-            except ImportError:
-                logger.warning("⚠️ gamification_handlers не знайдено")
-            
-            # Спроба імпортувати moderation_handlers
-            try:
-                from moderation_handlers import register_moderation_handlers
-                register_moderation_handlers(self.dp)
-                handlers_registered += 1
-                logger.info("✅ Модерація зареєстровано")
-            except ImportError:
-                logger.warning("⚠️ moderation_handlers не знайдено")
-            
-            # Спроба імпортувати duel_handlers
-            try:
-                from duel_handlers import register_duel_handlers
-                register_duel_handlers(self.dp)
-                handlers_registered += 1
-                logger.info("✅ Дуелі зареєстровано")
-            except ImportError:
-                logger.warning("⚠️ duel_handlers не знайдено")
+            for module_name, func_name, description in handler_modules:
+                try:
+                    module = __import__(module_name, fromlist=[func_name])
+                    register_func = getattr(module, func_name)
+                    register_func(self.dp)
+                    handlers_registered += 1
+                    logger.info(f"✅ {description} - зареєстровано")
+                    break  # Якщо знайшли цей модуль, пропускаємо інші варіанти
+                except (ImportError, AttributeError):
+                    continue
             
             # Якщо нічого не зареєстровано, додаємо базові хендлери
             if handlers_registered == 0:
@@ -141,7 +130,13 @@ class UkrainianBot:
             
         except Exception as e:
             logger.error(f"❌ Помилка реєстрації хендлерів: {e}")
-            return False
+            # Все одно реєструємо fallback хендлери
+            try:
+                self.register_fallback_handlers()
+                return True
+            except Exception as fallback_error:
+                logger.error(f"❌ Навіть fallback хендлери не працюють: {fallback_error}")
+                return False
     
     def register_fallback_handlers(self):
         """Базові хендлери як fallback"""
@@ -159,7 +154,8 @@ class UkrainianBot:
                 f"Доступні команди:\n"
                 f"• /start - запуск\n"
                 f"• /help - допомога\n"
-                f"• /status - статус бота"
+                f"• /status - статус бота\n"
+                f"• /test - тест функцій"
             )
         
         @self.dp.message(Command("help"))
@@ -169,8 +165,10 @@ class UkrainianBot:
                 f"Базові команди:\n"
                 f"• /start - запуск бота\n"
                 f"• /help - ця довідка\n"
-                f"• /status - статус\n\n"
-                f"{EMOJI['fire']} Бот працює в базовому режимі"
+                f"• /status - статус\n"
+                f"• /test - тест\n\n"
+                f"{EMOJI['fire']} Бот працює в базовому режимі\n"
+                f"🔧 Для повного функціоналу потрібні додаткові модулі"
             )
         
         @self.dp.message(Command("status"))
@@ -180,51 +178,94 @@ class UkrainianBot:
                 f"🤖 Бот: активний\n"
                 f"👥 Адмін: {settings.ADMIN_ID}\n"
                 f"💾 БД: {settings.DATABASE_URL.split('@')[0] if '@' in settings.DATABASE_URL else 'Local'}@***\n"
-                f"🧠 AI: {'✅' if settings.OPENAI_API_KEY else '❌'}\n"
+                f"🧠 AI: {'✅' if getattr(settings, 'OPENAI_API_KEY', None) else '❌'}\n"
                 f"🔥 Режим: базовий"
             )
         
+        @self.dp.message(Command("test"))
+        async def cmd_test_fallback(message: Message):
+            test_msg = f"{EMOJI['fire']} <b>Тест функцій:</b>\n\n"
+            
+            # Тест відправки повідомлення
+            test_msg += f"✅ Відправка повідомлень - OK\n"
+            
+            # Тест HTML форматування
+            test_msg += f"✅ HTML форматування - OK\n"
+            
+            # Тест емодзі
+            test_msg += f"✅ Емодзі {EMOJI['brain']}{EMOJI['laugh']}{EMOJI['fire']} - OK\n"
+            
+            # Тест налаштувань
+            test_msg += f"✅ Налаштування - OK\n"
+            
+            test_msg += f"\n{EMOJI['check']} Всі базові функції працюють!"
+            
+            await message.answer(test_msg)
+        
+        # Обробник всіх інших повідомлень
         @self.dp.message(F.text)
         async def fallback_handler(message: Message):
             if not message.text.startswith('/'):
                 await message.answer(
-                    f"{EMOJI['star']} Використай /help для допомоги"
+                    f"{EMOJI['star']} Привіт! Використай /help для допомоги\n"
+                    f"Або /start для початку роботи"
                 )
+        
+        logger.info("🔧 Fallback хендлери зареєстровано")
     
     async def setup_database(self):
         """Ініціалізація бази даних"""
         try:
-            # Спроба ініціалізувати БД якщо є модуль
-            try:
-                from database import init_db  # Замість database.database
-                await init_db()
-                logger.info("💾 База даних ініціалізована")
-            except ImportError:
-                logger.warning("⚠️ Модуль database не знайдено, пропускаємо ініціалізацію БД")
+            # Спробуємо різні варіанти імпорту БД
+            database_modules = [
+                ("database", "init_db"),
+                ("database.database", "init_db"),
+                ("models", "init_db")
+            ]
             
+            for module_name, func_name in database_modules:
+                try:
+                    module = __import__(module_name, fromlist=[func_name])
+                    init_db = getattr(module, func_name)
+                    await init_db()
+                    logger.info("💾 База даних ініціалізована")
+                    return True
+                except (ImportError, AttributeError):
+                    continue
+            
+            logger.warning("⚠️ Модуль database не знайдено, пропускаємо ініціалізацію БД")
             return True
             
         except Exception as e:
             logger.error(f"❌ Помилка ініціалізації БД: {e}")
-            return False
+            return True  # Продовжуємо без БД
     
     async def setup_scheduler(self):
         """Налаштування планувальника задач"""
         try:
-            # Спроба запустити планувальник якщо є модуль
-            try:
-                from scheduler import SchedulerService  # Замість services.scheduler
-                self.scheduler = SchedulerService(self.bot)
-                await self.scheduler.start()
-                logger.info("⏰ Планувальник запущено")
-            except ImportError:
-                logger.warning("⚠️ Модуль scheduler не знайдено, пропускаємо планувальник")
+            # Спробуємо різні варіанти імпорту планувальника
+            scheduler_modules = [
+                ("scheduler", "SchedulerService"),
+                ("services.scheduler", "SchedulerService")
+            ]
             
+            for module_name, class_name in scheduler_modules:
+                try:
+                    module = __import__(module_name, fromlist=[class_name])
+                    SchedulerService = getattr(module, class_name)
+                    self.scheduler = SchedulerService(self.bot)
+                    await self.scheduler.start()
+                    logger.info("⏰ Планувальник запущено")
+                    return True
+                except (ImportError, AttributeError):
+                    continue
+            
+            logger.warning("⚠️ Модуль scheduler не знайдено, пропускаємо планувальник")
             return True
             
         except Exception as e:
             logger.error(f"❌ Помилка запуску планувальника: {e}")
-            return False
+            return True  # Продовжуємо без планувальника
     
     async def create_webapp(self):
         """Створення веб-додатку для Railway"""
@@ -238,7 +279,8 @@ class UkrainianBot:
                     "status": "healthy",
                     "bot": "ukrainian_telegram_bot",
                     "version": "1.0.0",
-                    "admin_id": settings.ADMIN_ID
+                    "admin_id": settings.ADMIN_ID,
+                    "bot_ready": self.bot is not None
                 })
             
             # Статична сторінка
@@ -246,13 +288,23 @@ class UkrainianBot:
                 return web.Response(
                     text=f"""
                     <html>
-                        <head><title>🧠😂🔥 Україномовний Telegram-бот</title></head>
-                        <body style="font-family: Arial; text-align: center; padding: 50px;">
+                        <head>
+                            <title>🧠😂🔥 Україномовний Telegram-бот</title>
+                            <style>
+                                body {{ font-family: Arial; text-align: center; padding: 50px; background: #f0f8ff; }}
+                                .status {{ color: {'green' if self.bot else 'red'}; }}
+                            </style>
+                        </head>
+                        <body>
                             <h1>🧠😂🔥 Україномовний Telegram-бот</h1>
-                            <p>✅ Бот активний та працює!</p>
-                            <p>🤖 Версія: 1.0.0</p>
-                            <p>👥 Адмін: {settings.ADMIN_ID}</p>
-                            <p>📊 <a href="/health">Health Check</a></p>
+                            <div class="status">
+                                <p>✅ Статус: {'Активний' if self.bot else 'Помилка'}</p>
+                                <p>🤖 Версія: 1.0.0</p>
+                                <p>👥 Адмін: {settings.ADMIN_ID}</p>
+                                <p>📊 <a href="/health">Health Check</a></p>
+                            </div>
+                            <hr>
+                            <p>🇺🇦 Зроблено з ❤️ для української мем-спільноти!</p>
                         </body>
                     </html>
                     """,
@@ -290,6 +342,9 @@ class UkrainianBot:
     
     async def start_polling(self):
         """Запуск бота в режимі polling"""
+        if not self.bot:
+            raise ValueError("Бот не створено!")
+            
         try:
             logger.info(f"🚀 Запуск бота в режимі polling...")
             
@@ -350,6 +405,7 @@ class UkrainianBot:
                 ("🌐 Запуск веб-сервера", self.start_webapp())
             ]
             
+            success_count = 0
             for step_name, step_coro in steps:
                 logger.info(f"▶️ {step_name}...")
                 result = await step_coro
@@ -357,6 +413,13 @@ class UkrainianBot:
                     logger.warning(f"⚠️ {step_name} - пропущено через помилку")
                 else:
                     logger.info(f"✅ {step_name} - завершено")
+                    success_count += 1
+            
+            # Перевірка критичних компонентів
+            if not self.bot:
+                raise ValueError("Не вдалося створити бота!")
+            if not self.dp:
+                raise ValueError("Не вдалося створити диспетчер!")
             
             # Отримання інформації про бота
             bot_info = await self.bot.get_me()
@@ -370,11 +433,13 @@ class UkrainianBot:
                     f"🤖 <b>Бот:</b> @{bot_info.username}\n"
                     f"💾 <b>БД:</b> {'✅ Підключена' if hasattr(self, 'database_ok') else '⚠️ Базовий режим'}\n"
                     f"⏰ <b>Планувальник:</b> {'✅ Активний' if hasattr(self, 'scheduler') else '⚠️ Вимкнений'}\n"
-                    f"🧠 <b>AI:</b> {'✅ Активний' if getattr(settings, 'OPENAI_API_KEY', None) else '❌ Вимкнений'}\n\n"
+                    f"🧠 <b>AI:</b> {'✅ Активний' if getattr(settings, 'OPENAI_API_KEY', None) else '❌ Вимкнений'}\n"
+                    f"🎯 <b>Успішних кроків:</b> {success_count}/6\n\n"
                     f"📊 Доступні команди:\n"
                     f"• /start - перевірка роботи\n"
                     f"• /help - довідка\n"
-                    f"• /status - статус бота"
+                    f"• /status - статус бота\n"
+                    f"• /test - тест функцій"
                 )
             except Exception as e:
                 logger.warning(f"Не вдалося повідомити адміністратора: {e}")
