@@ -134,12 +134,12 @@ async def show_quick_stats(message: Message):
         from database.database import get_db_session
         
         with get_db_session() as session:
-            from database.models import User, Content, Rating
+            from database.models import User, Content, Rating, ContentStatus
             
-            # Швидкі метрики
+            # 🔥 ВИПРАВЛЕНО: Використовуємо правильні enum значення
             total_users = session.query(User).count()
             total_content = session.query(Content).count()
-            pending_content = session.query(Content).filter(Content.status == "pending").count()
+            pending_content = session.query(Content).filter(Content.status == ContentStatus.PENDING).count()
             
             # Сьогоднішня активність
             today = datetime.utcnow().date()
@@ -178,13 +178,13 @@ async def show_detailed_stats(message: Message):
         from database.database import get_db_session
         
         with get_db_session() as session:
-            from database.models import User, Content, Rating
+            from database.models import User, Content, Rating, ContentStatus
             
-            # Загальна статистика
+            # 🔥 ВИПРАВЛЕНО: Використовуємо правильні enum значення
             total_users = session.query(User).count()
             total_content = session.query(Content).count()
-            pending_content = session.query(Content).filter(Content.status == "pending").count()
-            approved_content = session.query(Content).filter(Content.status == "approved").count()
+            pending_content = session.query(Content).filter(Content.status == ContentStatus.PENDING).count()
+            approved_content = session.query(Content).filter(Content.status == ContentStatus.APPROVED).count()
             
             # Статистика за сьогодні
             today = datetime.utcnow().date()
@@ -239,13 +239,13 @@ async def show_detailed_stats(message: Message):
 async def show_moderation_interface(message: Message):
     """Інтерфейс модерації"""
     try:
-        # Спробуємо отримати контент на модерації
         from database.database import get_db_session
         
         with get_db_session() as session:
-            from database.models import Content, User
+            from database.models import Content, User, ContentStatus
             
-            pending_content = session.query(Content).filter(Content.status == "pending").all()
+            # 🔥 ВИПРАВЛЕНО: Використовуємо правильний enum
+            pending_content = session.query(Content).filter(Content.status == ContentStatus.PENDING).all()
             
             if not pending_content:
                 await message.answer(
@@ -269,7 +269,8 @@ async def show_moderation_interface(message: Message):
                 author_name = author.first_name or author.username or f"ID{author.id}"
                 author_stats = f"Балів: {author.points}"
             
-            content_type = "Анекдот" if content.content_type == "joke" else "Мем"
+            # 🔥 ВИПРАВЛЕНО: Правильна перевірка типу контенту
+            content_type = "Анекдот" if content.content_type.value == "joke" else "Мем"
             
             moderation_text = (
                 f"{EMOJI['brain']} <b>МОДЕРАЦІЯ КОНТЕНТУ</b>\n\n"
@@ -363,15 +364,17 @@ async def callback_approve_content(callback_query: CallbackQuery):
     try:
         content_id = int(callback_query.data.split("_")[1])
         
-        # Схвалюємо контент в БД
+        # 🔥 ВИПРАВЛЕНО: Використовуємо правильний enum
         from database.database import get_db_session
         
         with get_db_session() as session:
-            from database.models import Content
+            from database.models import Content, ContentStatus
             
             content = session.query(Content).filter(Content.id == content_id).first()
             if content:
-                content.status = "approved"
+                content.status = ContentStatus.APPROVED
+                content.moderated_at = datetime.utcnow()
+                content.moderator_id = callback_query.from_user.id
                 session.commit()
                 
                 await callback_query.answer(f"{EMOJI['check']} Контент схвалено!")
@@ -394,15 +397,17 @@ async def callback_reject_content(callback_query: CallbackQuery):
     try:
         content_id = int(callback_query.data.split("_")[1])
         
-        # Відхиляємо контент в БД
+        # 🔥 ВИПРАВЛЕНО: Використовуємо правильний enum
         from database.database import get_db_session
         
         with get_db_session() as session:
-            from database.models import Content
+            from database.models import Content, ContentStatus
             
             content = session.query(Content).filter(Content.id == content_id).first()
             if content:
-                content.status = "rejected"
+                content.status = ContentStatus.REJECTED
+                content.moderated_at = datetime.utcnow()
+                content.moderator_id = callback_query.from_user.id
                 session.commit()
                 
                 await callback_query.answer(f"{EMOJI['cross']} Контент відхилено!")
