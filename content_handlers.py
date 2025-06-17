@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Хендлери для роботи з контентом 🧠😂🔥
+🧠😂🔥 Хендлери для роботи з контентом + інтеграція з гейміфікацією 🧠😂🔥
 """
 
 import logging
@@ -14,8 +14,12 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-# Імпорти з нашого проекту
-from settings import settings, EMOJI, TEXTS, TIME_GREETINGS
+from config.settings import TEXTS, EMOJI, TIME_GREETINGS, settings
+from database.database import (
+    get_random_joke, get_random_meme, submit_content, 
+    update_user_points, get_or_create_user, get_db_session
+)
+from database.models import ContentType, Rating
 
 logger = logging.getLogger(__name__)
 
@@ -23,183 +27,162 @@ logger = logging.getLogger(__name__)
 class SubmissionStates(StatesGroup):
     waiting_for_content = State()
 
-# Тимчасові дані поки БД не налаштована
-SAMPLE_JOKES = [
-    "🧠 Приходить програміст до лікаря:\n- Доктор, в мене болить рука!\n- А де саме?\n- В лівому кліку! 😂",
-    "🔥 Зустрічаються два українці:\n- Як справи?\n- Та нормально, працюю в IT.\n- А що робиш?\n- Борщ доставляю через додаток! 😂",
-    "😂 Учитель запитує:\n- Петрику, скільки буде 2+2?\n- А ви про що? Про гривні чи про долари? 🧠",
-    "🔥 Покупець у магазині:\n- Скільки коштує хліб?\n- 20 гривень.\n- А вчора був 15!\n- Вчора ви його і не купили! 😂",
-    "🧠 Дружина чоловікові:\n- Любий, я схудла на 5 кг!\n- А де вони?\n- В холодильнику! 😂🔥",
-    "😂 Син питає батька:\n- Тату, а що таке політика?\n- Це коли багато людей говорять, а нічого не роблять.\n- А що таке демократія?\n- Це коли всі мають право говорити, але слухає тільки мама! 🧠",
-    "🔥 Лікар пацієнтові:\n- Ви кури?\n- Ні.\n- П'єте?\n- Ні.\n- Тоді живіть як хочете - все одно довго протягнете! 😂",
-    "🧠 Заходить чоловік до аптеки:\n- Дайте щось від голови!\n- А що саме болить?\n- Дружина! 😂🔥",
-    "😂 Розмова в офісі:\n- Ти чому такий веселий?\n- Зарплату підняли!\n- На скільки?\n- На другий поверх! 🧠",
-    "🔥 Студент здає екзамен:\n- Розкажіть про Наполеона.\n- Не можу, ми не знайомі особисто.\n- Тоді про Пушкіна.\n- Теж не знайомі.\n- Незадовільно!\n- А з ким ви знайомі?\n- З вами... і то погано! 😂"
-]
-
-SAMPLE_MEMES = [
-    {
-        "caption": "🧠 Коли нарешті зрозумів як працює async/await 😂",
-        "description": "Мем про програмування"
-    },
-    {
-        "caption": "🔥 Настрій понеділка vs настрій п'ятниці 😂",
-        "description": "Мем про робочий тиждень"
-    },
-    {
-        "caption": "🧠 Коли код працює з першого разу 😂🔥",
-        "description": "Мем про чудеса програмування"
-    },
-    {
-        "caption": "😂 Коли побачив зарплату після податків 🤔",
-        "description": "Мем про зарплату"
-    },
-    {
-        "caption": "🔥 Українець під час блекауту: 'А у нас світло є!' 😎",
-        "description": "Мем про українську стійкість"
-    }
-]
+async def cmd_meme(message: Message):
+    """Команда /meme"""
+    await send_meme(message)
 
 async def cmd_anekdot(message: Message):
     """Команда /anekdot"""
     await send_joke(message)
 
-async def cmd_meme(message: Message):
-    """Команда /meme"""
-    await send_meme(message)
-
-async def send_joke(message: Message, from_callback: bool = False):
-    """Надсилання випадкового анекдоту"""
-    user_id = message.from_user.id
-    
-    try:
-        # Спробуємо отримати з БД
-        try:
-            from database import get_random_joke
-            joke_obj = await get_random_joke()
-            if joke_obj:
-                joke_text = joke_obj.text
-            else:
-                # Якщо БД порожня, використовуємо зразки
-                joke_text = random.choice(SAMPLE_JOKES)
-        except:
-            # Якщо БД не працює, використовуємо зразки
-            joke_text = random.choice(SAMPLE_JOKES)
-        
-        # Контекстне привітання залежно від часу
-        current_hour = datetime.now().hour
-        if 6 <= current_hour < 12:
-            greeting = random.choice(TIME_GREETINGS["morning"])
-        elif 12 <= current_hour < 18:
-            greeting = random.choice(TIME_GREETINGS["day"])
-        elif 18 <= current_hour < 23:
-            greeting = random.choice(TIME_GREETINGS["evening"])
-        else:
-            greeting = random.choice(TIME_GREETINGS["night"])
-        
-        # Клавіатура для взаємодії
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text=f"{EMOJI['like']} Подобається", callback_data="like_joke"),
-                InlineKeyboardButton(text=f"{EMOJI['dislike']} Не подобається", callback_data="dislike_joke")
-            ],
-            [
-                InlineKeyboardButton(text=f"{EMOJI['brain']} Ще анекдот", callback_data="get_joke"),
-                InlineKeyboardButton(text=f"{EMOJI['laugh']} Мем", callback_data="get_meme")
-            ],
-            [
-                InlineKeyboardButton(text=f"{EMOJI['fire']} Надіслати свій", callback_data="submit_joke")
-            ]
-        ])
-        
-        response_text = f"{greeting}\n\n{joke_text}\n\n{EMOJI['star']} Сподобався анекдот? Оціни!"
-        
-        await message.answer(
-            response_text,
-            reply_markup=keyboard
-        )
-        
-        # Нарахування балів (якщо БД працює)
-        try:
-            from database import update_user_points
-            await update_user_points(user_id, 1, "перегляд анекдоту")
-        except:
-            pass  # Ігноруємо помилки БД
-        
-        if not from_callback:
-            logger.info(f"🧠 Користувач {user_id} отримав анекдот")
-            
-    except Exception as e:
-        logger.error(f"Помилка надсилання анекдоту: {e}")
-        await message.answer(f"{EMOJI['cross']} Упс! Сталася помилка. Спробуй ще раз!")
-
 async def send_meme(message: Message, from_callback: bool = False):
-    """Надсилання випадкового мему"""
+    """Надсилання випадкового мему з нарахуванням балів"""
     user_id = message.from_user.id
     
+    # Отримання випадкового мему
+    meme = await get_random_meme()
+    
+    if not meme:
+        await message.answer(TEXTS["no_content"])
+        return
+    
+    # Контекстне привітання залежно від часу
+    current_hour = datetime.now().hour
+    if 6 <= current_hour < 12:
+        greeting = random.choice(TIME_GREETINGS["morning"])
+    elif 12 <= current_hour < 18:
+        greeting = random.choice(TIME_GREETINGS["day"])
+    elif 18 <= current_hour < 23:
+        greeting = random.choice(TIME_GREETINGS["evening"])
+    else:
+        greeting = random.choice(TIME_GREETINGS["night"])
+    
+    # Клавіатура для взаємодії з балами
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text=f"{EMOJI['like']} Подобається (+{settings.POINTS_FOR_REACTION})", 
+                callback_data=f"like_content:{meme.id}"
+            ),
+            InlineKeyboardButton(
+                text=f"{EMOJI['dislike']} Не подобається", 
+                callback_data=f"dislike_content:{meme.id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(text=f"{EMOJI['laugh']} Ще мем", callback_data="get_meme"),
+            InlineKeyboardButton(text=f"{EMOJI['brain']} Анекдот", callback_data="get_joke")
+        ],
+        [
+            InlineKeyboardButton(text=f"{EMOJI['fire']} Мій профіль", callback_data="show_profile"),
+            InlineKeyboardButton(text=f"{EMOJI['fire']} Надіслати свій", callback_data="submit_content")
+        ]
+    ])
+    
+    caption = (
+        f"{greeting}\n\n"
+        f"{meme.text}\n\n"
+        f"{EMOJI['fire']} Переглядів: {meme.views} | "
+        f"{EMOJI['like']} {meme.likes} | "
+        f"{EMOJI['dislike']} {meme.dislikes}"
+    )
+    
     try:
-        # Спробуємо отримати з БД
-        try:
-            from database import get_random_meme
-            meme_obj = await get_random_meme()
-            if meme_obj:
-                meme_data = {"caption": meme_obj.text, "description": "Мем з бази"}
-            else:
-                # Якщо БД порожня, використовуємо зразки
-                meme_data = random.choice(SAMPLE_MEMES)
-        except:
-            # Якщо БД не працює, використовуємо зразки
-            meme_data = random.choice(SAMPLE_MEMES)
-        
-        # Контекстне привітання
-        current_hour = datetime.now().hour
-        if 6 <= current_hour < 12:
-            greeting = random.choice(TIME_GREETINGS["morning"])
-        elif 12 <= current_hour < 18:
-            greeting = random.choice(TIME_GREETINGS["day"])
-        elif 18 <= current_hour < 23:
-            greeting = random.choice(TIME_GREETINGS["evening"])
+        if meme.file_id:
+            await message.answer_photo(
+                photo=meme.file_id,
+                caption=caption,
+                reply_markup=keyboard
+            )
+        elif meme.file_url:
+            await message.answer_photo(
+                photo=meme.file_url,
+                caption=caption,
+                reply_markup=keyboard
+            )
         else:
-            greeting = random.choice(TIME_GREETINGS["night"])
-        
-        # Клавіатура для взаємодії
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text=f"{EMOJI['like']} Подобається", callback_data="like_meme"),
-                InlineKeyboardButton(text=f"{EMOJI['dislike']} Не подобається", callback_data="dislike_meme")
-            ],
-            [
-                InlineKeyboardButton(text=f"{EMOJI['laugh']} Ще мем", callback_data="get_meme"),
-                InlineKeyboardButton(text=f"{EMOJI['brain']} Анекдот", callback_data="get_joke")
-            ],
-            [
-                InlineKeyboardButton(text=f"{EMOJI['fire']} Надіслати свій", callback_data="submit_meme")
-            ]
-        ])
-        
-        response_text = f"{greeting}\n\n{meme_data['caption']}\n\n{EMOJI['star']} Сподобався мем? Оціни!"
-        
-        await message.answer(
-            response_text,
-            reply_markup=keyboard
-        )
-        
-        # Нарахування балів (якщо БД працює)
-        try:
-            from database import update_user_points
-            await update_user_points(user_id, 1, "перегляд мему")
-        except:
-            pass  # Ігноруємо помилки БД
-        
-        if not from_callback:
-            logger.info(f"😂 Користувач {user_id} отримав мем")
-            
+            await message.answer(
+                f"{caption}\n\n{EMOJI['brain']} {meme.text}",
+                reply_markup=keyboard
+            )
     except Exception as e:
         logger.error(f"Помилка надсилання мему: {e}")
-        await message.answer(f"{EMOJI['cross']} Упс! Сталася помилка. Спробуй ще раз!")
+        await message.answer(
+            f"{caption}\n\n{EMOJI['brain']} {meme.text}",
+            reply_markup=keyboard
+        )
+    
+    # 🎯 НАРАХУВАННЯ БАЛІВ ЗА ПЕРЕГЛЯД МЕМУ
+    await update_user_points(user_id, 1, "перегляд мему")
+    
+    if not from_callback:
+        logger.info(f"😂 Користувач {user_id} отримав мем {meme.id}")
+
+async def send_joke(message: Message, from_callback: bool = False):
+    """Надсилання випадкового анекдоту з нарахуванням балів"""
+    user_id = message.from_user.id
+    
+    # Отримання випадкового анекдоту
+    joke = await get_random_joke()
+    
+    if not joke:
+        await message.answer(TEXTS["no_content"])
+        return
+    
+    # Контекстне привітання
+    current_hour = datetime.now().hour
+    if 6 <= current_hour < 12:
+        greeting = random.choice(TIME_GREETINGS["morning"])
+    elif 12 <= current_hour < 18:
+        greeting = random.choice(TIME_GREETINGS["day"])
+    elif 18 <= current_hour < 23:
+        greeting = random.choice(TIME_GREETINGS["evening"])
+    else:
+        greeting = random.choice(TIME_GREETINGS["night"])
+    
+    # Клавіатура для взаємодії з балами
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text=f"{EMOJI['like']} Подобається (+{settings.POINTS_FOR_REACTION})", 
+                callback_data=f"like_content:{joke.id}"
+            ),
+            InlineKeyboardButton(
+                text=f"{EMOJI['dislike']} Не подобається", 
+                callback_data=f"dislike_content:{joke.id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(text=f"{EMOJI['brain']} Ще анекдот", callback_data="get_joke"),
+            InlineKeyboardButton(text=f"{EMOJI['laugh']} Мем", callback_data="get_meme")
+        ],
+        [
+            InlineKeyboardButton(text=f"{EMOJI['fire']} Мій профіль", callback_data="show_profile"),
+            InlineKeyboardButton(text=f"{EMOJI['vs']} Дуель", callback_data="start_duel")
+        ]
+    ])
+    
+    response_text = (
+        f"{greeting}\n\n"
+        f"{joke.text}\n\n"
+        f"{EMOJI['fire']} Переглядів: {joke.views} | "
+        f"{EMOJI['like']} {joke.likes} | "
+        f"{EMOJI['dislike']} {joke.dislikes}"
+    )
+    
+    await message.answer(
+        response_text,
+        reply_markup=keyboard
+    )
+    
+    # 🎯 НАРАХУВАННЯ БАЛІВ ЗА ПЕРЕГЛЯД АНЕКДОТУ
+    await update_user_points(user_id, 1, "перегляд анекдоту")
+    
+    if not from_callback:
+        logger.info(f"🧠 Користувач {user_id} отримав анекдот {joke.id}")
 
 async def cmd_submit(message: Message, state: FSMContext):
-    """Команда /submit для подачі контенту"""
+    """Команда /submit для подачі контенту з нарахуванням балів"""
     user_id = message.from_user.id
     
     # Перевіряємо чи є текст після команди
@@ -215,53 +198,68 @@ async def cmd_submit(message: Message, state: FSMContext):
             )
             return
         
-        # Тимчасово зберігаємо локально (поки БД не налаштована)
+        # Подача анекдоту
+        content = await submit_content(
+            user_id=user_id,
+            content_type=ContentType.JOKE,
+            text=joke_text
+        )
+        
+        # 🎯 НАРАХУВАННЯ БАЛІВ ЗА ПОДАЧУ КОНТЕНТУ
+        await update_user_points(user_id, settings.POINTS_FOR_SUBMISSION, "подача анекдоту")
+        
+        await message.answer(
+            f"{EMOJI['check']} <b>Дякую за твій анекдот!</b>\n\n"
+            f"{EMOJI['brain']} Він відправлений на модерацію\n"
+            f"{EMOJI['fire']} Ти отримав +{settings.POINTS_FOR_SUBMISSION} балів\n"
+            f"{EMOJI['time']} Очікуй результат протягом 24 годин\n\n"
+            f"{EMOJI['star']} Переглянь свій профіль: /profile"
+        )
+        
+        # Повідомлення адміністратору
         try:
-            # Повідомлення адміністратору
             await message.bot.send_message(
                 settings.ADMIN_ID,
-                f"{EMOJI['new']} <b>Новий анекдот!</b>\n\n"
+                f"{EMOJI['new']} <b>Новий анекдот на модерацію!</b>\n\n"
                 f"{EMOJI['profile']} <b>Від:</b> {message.from_user.first_name or 'Невідомий'} "
                 f"(@{message.from_user.username or 'без username'})\n"
                 f"{EMOJI['brain']} <b>Текст:</b>\n{joke_text}\n\n"
-                f"ID користувача: {user_id}"
+                f"Команди: /approve_{content.id} або /reject_{content.id}"
             )
         except Exception as e:
             logger.error(f"Не вдалося повідомити адміністратора: {e}")
         
-        await message.answer(
-            f"{EMOJI['check']} <b>Дякую за твій анекдот!</b>\n\n"
-            f"{EMOJI['brain']} Він відправлений адміністратору\n"
-            f"{EMOJI['fire']} Ти отримав +{settings.POINTS_FOR_SUBMISSION} балів\n"
-            f"{EMOJI['time']} Очікуй результат!"
-        )
-        
-        logger.info(f"🔥 Користувач {user_id} надіслав анекдот")
+        logger.info(f"🔥 Користувач {user_id} надіслав анекдот на модерацію")
         
     else:
-        # Немає тексту - показуємо інструкції
+        # Немає тексту - запитуємо що хоче надіслати
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text=f"{EMOJI['brain']} Як надіслати анекдот", callback_data="how_submit_joke"),
-                InlineKeyboardButton(text=f"{EMOJI['laugh']} Як надіслати мем", callback_data="how_submit_meme")
+                InlineKeyboardButton(text=f"{EMOJI['brain']} Анекдот", callback_data="submit_joke"),
+                InlineKeyboardButton(text=f"{EMOJI['laugh']} Мем", callback_data="submit_meme")
+            ],
+            [
+                InlineKeyboardButton(text=f"{EMOJI['star']} Мій профіль", callback_data="show_profile")
             ]
         ])
         
         await message.answer(
-            f"{EMOJI['fire']} <b>Надішли свій контент!</b>\n\n"
-            f"{EMOJI['brain']} <b>Анекдот:</b> /submit Твій текст анекдоту\n"
-            f"{EMOJI['laugh']} <b>Мем:</b> Надішли картинку з підписом\n\n"
-            f"{EMOJI['star']} <b>Приклад:</b>\n"
-            f"<code>/submit Чому програмісти п'ють каву? Бо без неї код не компілюється! {EMOJI['brain']}</code>",
+            f"{EMOJI['fire']} <b>Що хочеш надіслати?</b>\n\n"
+            f"{EMOJI['brain']} <b>Анекдот</b> - текстовий жарт (+{settings.POINTS_FOR_SUBMISSION} балів)\n"
+            f"{EMOJI['laugh']} <b>Мем</b> - картинка з підписом (+{settings.POINTS_FOR_SUBMISSION} балів)\n\n"
+            f"{EMOJI['info']} При схваленні отримаєш ще +{settings.POINTS_FOR_APPROVAL} балів!",
             reply_markup=keyboard
         )
 
 async def handle_photo_submission(message: Message):
-    """Обробка надісланого фото як мему"""
+    """Обробка надісланого фото як мему з нарахуванням балів"""
     user_id = message.from_user.id
     
     if not message.photo:
         return
+    
+    # Отримання найбільшого розміру фото
+    photo = message.photo[-1]
     
     # Підпис до мему
     caption = message.caption or f"{EMOJI['laugh']} Мем без підпису"
@@ -273,109 +271,158 @@ async def handle_photo_submission(message: Message):
         )
         return
     
+    # Подача мему
+    content = await submit_content(
+        user_id=user_id,
+        content_type=ContentType.MEME,
+        text=caption,
+        file_id=photo.file_id
+    )
+    
+    # 🎯 НАРАХУВАННЯ БАЛІВ ЗА ПОДАЧУ МЕМУ
+    await update_user_points(user_id, settings.POINTS_FOR_SUBMISSION, "подача мему")
+    
+    await message.answer(
+        f"{EMOJI['check']} <b>Дякую за твій мем!</b>\n\n"
+        f"{EMOJI['laugh']} Він відправлений на модерацію\n"
+        f"{EMOJI['fire']} Ти отримав +{settings.POINTS_FOR_SUBMISSION} балів\n"
+        f"{EMOJI['time']} Очікуй результат протягом 24 годин\n\n"
+        f"{EMOJI['star']} Переглянь свій профіль: /profile"
+    )
+    
     # Повідомлення адміністратору
     try:
         await message.bot.send_photo(
             settings.ADMIN_ID,
-            photo=message.photo[-1].file_id,
-            caption=f"{EMOJI['new']} <b>Новий мем!</b>\n\n"
+            photo=photo.file_id,
+            caption=f"{EMOJI['new']} <b>Новий мем на модерацію!</b>\n\n"
                    f"{EMOJI['profile']} <b>Від:</b> {message.from_user.first_name or 'Невідомий'} "
                    f"(@{message.from_user.username or 'без username'})\n"
                    f"{EMOJI['laugh']} <b>Підпис:</b> {caption}\n\n"
-                   f"ID користувача: {user_id}"
+                   f"Команди: /approve_{content.id} або /reject_{content.id}"
         )
     except Exception as e:
         logger.error(f"Не вдалося повідомити адміністратора: {e}")
     
-    await message.answer(
-        f"{EMOJI['check']} <b>Дякую за твій мем!</b>\n\n"
-        f"{EMOJI['laugh']} Він відправлений адміністратору\n"
-        f"{EMOJI['fire']} Ти отримав +{settings.POINTS_FOR_SUBMISSION} балів\n"
-        f"{EMOJI['time']} Очікуй результат!"
-    )
-    
-    logger.info(f"🔥 Користувач {user_id} надіслав мем")
+    logger.info(f"🔥 Користувач {user_id} надіслав мем на модерацію")
 
-# ===== CALLBACK ОБРОБНИКИ =====
-
-async def callback_get_joke(callback_query: CallbackQuery):
-    """Callback для отримання анекдоту"""
-    await send_joke(callback_query.message, from_callback=True)
-    await callback_query.answer()
-
-async def callback_get_meme(callback_query: CallbackQuery):
-    """Callback для отримання мему"""
-    await send_meme(callback_query.message, from_callback=True)
-    await callback_query.answer()
+# ===== CALLBACK ОБРОБНИКИ З НАРАХУВАННЯМ БАЛІВ =====
 
 async def callback_like_content(callback_query: CallbackQuery):
-    """Обробка лайка контенту"""
+    """Обробка лайка контенту з нарахуванням балів"""
+    content_id = int(callback_query.data.split(':')[1])
     user_id = callback_query.from_user.id
     
-    # Нарахування балів
-    try:
-        from database import update_user_points
-        await update_user_points(user_id, settings.POINTS_FOR_REACTION, "лайк контенту")
-    except:
-        pass  # Ігноруємо помилки БД
+    # Перевірка чи не лайкав вже
+    with get_db_session() as session:
+        existing_rating = session.query(Rating).filter(
+            Rating.user_id == user_id,
+            Rating.content_id == content_id,
+            Rating.action_type == "like"
+        ).first()
+        
+        if existing_rating:
+            await callback_query.answer(f"{EMOJI['warning']} Ти вже оцінив цей контент!")
+            return
+        
+        # Додавання лайка в БД
+        from database.models import Content
+        content = session.query(Content).filter(Content.id == content_id).first()
+        if content:
+            content.likes += 1
+            
+            # Додавання запису про рейтинг
+            rating = Rating(
+                user_id=user_id,
+                content_id=content_id,
+                action_type="like",
+                points_awarded=settings.POINTS_FOR_REACTION
+            )
+            session.add(rating)
+            session.commit()
     
-    await callback_query.answer(f"{EMOJI['like']} Дякую за оцінку! +{settings.POINTS_FOR_REACTION} балів")
+    # 🎯 НАРАХУВАННЯ БАЛІВ КОРИСТУВАЧУ ЗА ЛАЙК
+    await update_user_points(user_id, settings.POINTS_FOR_REACTION, "лайк контенту")
+    
+    await callback_query.answer(
+        f"{EMOJI['like']} Дякую за оцінку! +{settings.POINTS_FOR_REACTION} балів"
+    )
 
 async def callback_dislike_content(callback_query: CallbackQuery):
-    """Обробка дизлайка контенту"""
+    """Обробка дизлайка контенту з мінімальними балами"""
+    content_id = int(callback_query.data.split(':')[1])
     user_id = callback_query.from_user.id
     
-    # Нарахування балів
-    try:
-        from database import update_user_points
-        await update_user_points(user_id, 1, "дизлайк контенту")
-    except:
-        pass  # Ігноруємо помилки БД
+    # Перевірка чи не дизлайкав вже
+    with get_db_session() as session:
+        existing_rating = session.query(Rating).filter(
+            Rating.user_id == user_id,
+            Rating.content_id == content_id,
+            Rating.action_type == "dislike"
+        ).first()
+        
+        if existing_rating:
+            await callback_query.answer(f"{EMOJI['warning']} Ти вже оцінив цей контент!")
+            return
+        
+        # Додавання дизлайка в БД
+        from database.models import Content
+        content = session.query(Content).filter(Content.id == content_id).first()
+        if content:
+            content.dislikes += 1
+            
+            rating = Rating(
+                user_id=user_id,
+                content_id=content_id,
+                action_type="dislike",
+                points_awarded=1  # Менше балів за дизлайк
+            )
+            session.add(rating)
+            session.commit()
+    
+    # 🎯 МІНІМАЛЬНІ БАЛИ ЗА ДИЗЛАЙК (теж активність)
+    await update_user_points(user_id, 1, "дизлайк контенту")
     
     await callback_query.answer(f"{EMOJI['dislike']} Дякую за відгук! +1 бал")
 
-async def callback_submit_instructions(callback_query: CallbackQuery):
-    """Інструкції по поданні контенту"""
-    content_type = "анекдот" if "joke" in callback_query.data else "мем"
-    
-    if "joke" in callback_query.data:
-        instructions = (
-            f"{EMOJI['brain']} <b>Як надіслати анекдот:</b>\n\n"
-            f"1. Напиши <code>/submit</code> і одразу текст анекдоту\n"
-            f"2. Максимум {settings.MAX_JOKE_LENGTH} символів\n"
-            f"3. Анекдот має бути українською мовою\n"
-            f"4. Без мату та образ\n\n"
-            f"{EMOJI['star']} <b>Приклад:</b>\n"
-            f"<code>/submit Чому програмісти люблять природу? Бо в ній немає багів! {EMOJI['laugh']}</code>"
-        )
-    else:
-        instructions = (
-            f"{EMOJI['laugh']} <b>Як надіслати мем:</b>\n\n"
-            f"1. Прикріпи картинку до повідомлення\n"
-            f"2. Додай підпис до картинки\n"
-            f"3. Максимум {settings.MAX_MEME_CAPTION_LENGTH} символів у підписі\n"
-            f"4. Мем має бути смішним та відповідати правилам\n\n"
-            f"{EMOJI['star']} <b>Підпис - обов'язковий!</b>"
-        )
-    
-    await callback_query.message.edit_text(instructions)
+async def callback_submit_joke(callback_query: CallbackQuery):
+    """Callback для подачі анекдоту"""
+    await callback_query.message.answer(
+        f"{EMOJI['brain']} <b>Надішли свій анекдот!</b>\n\n"
+        f"{EMOJI['fire']} Просто напиши текст анекдоту у наступному повідомленні\n"
+        f"{EMOJI['star']} Максимум {settings.MAX_JOKE_LENGTH} символів\n"
+        f"{EMOJI['fire']} За подачу: +{settings.POINTS_FOR_SUBMISSION} балів\n"
+        f"{EMOJI['check']} При схваленні: +{settings.POINTS_FOR_APPROVAL} балів\n\n"
+        f"{EMOJI['thinking']} <b>Приклад:</b>\n"
+        f"Чому програмісти люблять природу? Бо в ній немає багів! {EMOJI['laugh']}"
+    )
+    await callback_query.answer()
+
+async def callback_submit_meme(callback_query: CallbackQuery):
+    """Callback для подачі мему"""
+    await callback_query.message.answer(
+        f"{EMOJI['laugh']} <b>Надішли свій мем!</b>\n\n"
+        f"{EMOJI['fire']} Прикріпи картинку з підписом\n"
+        f"{EMOJI['star']} Максимум {settings.MAX_MEME_CAPTION_LENGTH} символів у підписі\n"
+        f"{EMOJI['fire']} За подачу: +{settings.POINTS_FOR_SUBMISSION} балів\n"
+        f"{EMOJI['check']} При схваленні: +{settings.POINTS_FOR_APPROVAL} балів\n\n"
+        f"{EMOJI['brain']} Картинка + підпис = готовий мем!"
+    )
     await callback_query.answer()
 
 def register_content_handlers(dp: Dispatcher):
     """Реєстрація хендлерів контенту"""
     
     # Команди
-    dp.message.register(cmd_anekdot, Command("anekdot"))
     dp.message.register(cmd_meme, Command("meme"))
+    dp.message.register(cmd_anekdot, Command("anekdot"))
     dp.message.register(cmd_submit, Command("submit"))
     
     # Обробка фото
     dp.message.register(handle_photo_submission, F.photo)
     
-    # Callback запити
-    dp.callback_query.register(callback_get_joke, F.data == "get_joke")
-    dp.callback_query.register(callback_get_meme, F.data == "get_meme")
-    dp.callback_query.register(callback_like_content, F.data.in_(["like_joke", "like_meme"]))
-    dp.callback_query.register(callback_dislike_content, F.data.in_(["dislike_joke", "dislike_meme"]))
-    dp.callback_query.register(callback_submit_instructions, F.data.in_(["how_submit_joke", "how_submit_meme"]))
-    dp.callback_query.register(callback_submit_instructions, F.data.in_(["submit_joke", "submit_meme"]))
+    # Callback запити з нарахуванням балів
+    dp.callback_query.register(callback_like_content, F.data.startswith("like_content:"))
+    dp.callback_query.register(callback_dislike_content, F.data.startswith("dislike_content:"))
+    dp.callback_query.register(callback_submit_joke, F.data == "submit_joke")
+    dp.callback_query.register(callback_submit_meme, F.data == "submit_meme")

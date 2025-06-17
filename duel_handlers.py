@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 # FSM для дуелей
 class DuelStates(StatesGroup):
     waiting_for_joke = State()
-    waiting_for_opponent = State()
 
 async def cmd_duel(message: Message, state: FSMContext):
     """Команда /duel - почати дуель жартів"""
@@ -40,10 +39,8 @@ async def cmd_duel(message: Message, state: FSMContext):
         ).first()
         
         if active_duel:
-            await message.answer(
-                f"{EMOJI['vs']} <b>У тебе вже є активна дуель!</b>\n\n"
-                f"{EMOJI['time']} Дочекайся завершення поточної дуелі"
-            )
+            # Показати поточну дуель
+            await show_active_duel(message, active_duel)
             return
     
     # Клавіатура вибору типу дуелі
@@ -64,6 +61,10 @@ async def cmd_duel(message: Message, state: FSMContext):
             InlineKeyboardButton(
                 text=f"{EMOJI['thinking']} Як працює дуель?",
                 callback_data="duel_info"
+            ),
+            InlineKeyboardButton(
+                text=f"{EMOJI['stats']} Історія дуелей",
+                callback_data="duel_history"
             )
         ]
     ])
@@ -73,48 +74,93 @@ async def cmd_duel(message: Message, state: FSMContext):
         f"{EMOJI['fire']} Обери варіант дуелі:\n\n"
         f"{EMOJI['brain']} <b>З моїм жартом</b> - надішли свій анекдот\n"
         f"{EMOJI['laugh']} <b>З випадковим</b> - використай жарт з бази\n\n"
-        f"{EMOJI['trophy']} <b>Переможець отримує +15 балів!</b>",
+        f"{EMOJI['trophy']} <b>Переможець отримує +{settings.POINTS_FOR_DUEL_WIN} балів!</b>\n"
+        f"{EMOJI['vs']} <b>Голосування триває {settings.DUEL_VOTING_TIME // 60} хвилин</b>",
         reply_markup=keyboard
     )
+
+async def show_active_duel(message: Message, duel: Duel):
+    """Показ активної дуелі користувача"""
+    with get_db_session() as session:
+        initiator_content = session.query(Content).filter(Content.id == duel.initiator_content_id).first()
+        opponent_content = session.query(Content).filter(Content.id == duel.opponent_content_id).first()
+        
+        initiator = session.query(User).filter(User.id == duel.initiator_id).first()
+        opponent = session.query(User).filter(User.id == duel.opponent_id).first() if duel.opponent_id else None
+        
+        time_left = (duel.voting_ends_at - datetime.utcnow()).total_seconds()
+        time_left_minutes = max(0, int(time_left // 60))
+        
+        duel_text = (
+            f"{EMOJI['vs']} <b>ТВОЯ АКТИВНА ДУЕЛЬ #{duel.id}</b>\n\n"
+            f"{EMOJI['fire']} <b>Жарт А</b> від {initiator.first_name if initiator else 'Невідомий'}:\n"
+            f"{initiator_content.text if initiator_content else 'Контент не знайдено'}\n\n"
+            f"{EMOJI['brain']} <b>Жарт Б</b> від {opponent.first_name if opponent else 'Бот'}:\n"
+            f"{opponent_content.text if opponent_content else 'Контент не знайдено'}\n\n"
+            f"{EMOJI['fire']} Голосів за А: {duel.initiator_votes}\n"
+            f"{EMOJI['brain']} Голосів за Б: {duel.opponent_votes}\n"
+            f"{EMOJI['time']} Залишилось: {time_left_minutes} хвилин"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"{EMOJI['fire']} Жарт А ({duel.initiator_votes})",
+                    callback_data=f"vote_duel:{duel.id}:initiator"
+                ),
+                InlineKeyboardButton(
+                    text=f"{EMOJI['brain']} Жарт Б ({duel.opponent_votes})",
+                    callback_data=f"vote_duel:{duel.id}:opponent"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"{EMOJI['stats']} Оновити результати",
+                    callback_data=f"duel_results:{duel.id}"
+                )
+            ]
+        ])
+        
+        await message.answer(duel_text, reply_markup=keyboard)
 
 async def create_duel_with_content(user_id: int, content: Content, bot) -> Duel:
     """Створення дуелі з контентом"""
     with get_db_session() as session:
+        # Знаходження контенту опонента (випадковий анекдот)
+        opponent_content = await get_random_joke()
+        
+        if not opponent_content:
+            raise Exception("Не знайдено контенту для дуелі")
+        
         # Створення дуелі
         duel = Duel(
             initiator_id=user_id,
             initiator_content_id=content.id,
+            opponent_content_id=opponent_content.id,
+            opponent_id=opponent_content.author_id,
             voting_ends_at=datetime.utcnow() + timedelta(seconds=settings.DUEL_VOTING_TIME),
             status=DuelStatus.ACTIVE
         )
         session.add(duel)
         session.commit()
         
-        # Оновлення ID дуелі
-        duel_id = duel.id
-        
-        logger.info(f"🔥 Створено дуель {duel_id} від користувача {user_id}")
+        logger.info(f"🔥 Створено дуель {duel.id} від користувача {user_id}")
         return duel
 
-async def find_opponent_content() -> Optional[Content]:
-    """Знаходження контенту опонента"""
-    # Для простоти використовуємо випадковий анекдот
-    return await get_random_joke()
-
-async def start_duel_voting(duel: Duel, bot):
-    """Початок голосування в дуелі"""
+async def start_duel_voting(duel: Duel, bot, initiator_message: Message):
+    """Початок голосування в дуелі з розсилкою іншим користувачам"""
     with get_db_session() as session:
         # Отримання контенту
         initiator_content = session.query(Content).filter(Content.id == duel.initiator_content_id).first()
         opponent_content = session.query(Content).filter(Content.id == duel.opponent_content_id).first()
         
-        if not (initiator_content and opponent_content):
-            logger.error(f"Не знайдено контент для дуелі {duel.id}")
-            return
-        
         # Отримання користувачів
         initiator = session.query(User).filter(User.id == duel.initiator_id).first()
         opponent = session.query(User).filter(User.id == duel.opponent_id).first()
+        
+        if not (initiator_content and opponent_content):
+            logger.error(f"Не знайдено контент для дуелі {duel.id}")
+            return
         
         # Клавіатура голосування
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -137,30 +183,50 @@ async def start_duel_voting(duel: Duel, bot):
         ])
         
         duel_text = (
-            f"{EMOJI['vs']} <b>ДУЕЛЬ ЖАРТІВ!</b>\n\n"
+            f"{EMOJI['vs']} <b>ДУЕЛЬ ЖАРТІВ #{duel.id}</b>\n\n"
             f"{EMOJI['fire']} <b>Жарт А</b> від {initiator.first_name or 'Невідомий'}:\n"
             f"{initiator_content.text}\n\n"
-            f"{EMOJI['brain']} <b>Жарт Б</b> від {opponent.first_name or 'Випадковий'}:\n"
+            f"{EMOJI['brain']} <b>Жарт Б</b> від {opponent.first_name or 'Бот'}:\n"
             f"{opponent_content.text}\n\n"
             f"{EMOJI['time']} <b>Голосування закінчується через {settings.DUEL_VOTING_TIME // 60} хвилин</b>\n"
-            f"{EMOJI['trophy']} Переможець отримає +15 балів!"
+            f"{EMOJI['trophy']} Переможець отримає +{settings.POINTS_FOR_DUEL_WIN} балів!\n"
+            f"{EMOJI['like']} Кожен голос: +2 бали учаснику"
         )
         
         # Надсилання повідомлення ініціатору
         try:
-            await bot.send_message(
-                duel.initiator_id,
+            await initiator_message.answer(
                 f"{EMOJI['vs']} <b>Твоя дуель почалася!</b>\n\n{duel_text}",
                 reply_markup=keyboard
             )
         except Exception as e:
             logger.error(f"Не вдалося повідомити ініціатора: {e}")
         
-        # Можна також відправити в канал або групу для публічного голосування
-        # await bot.send_message(PUBLIC_CHANNEL_ID, duel_text, reply_markup=keyboard)
+        # Розсилка активним користувачам (останні 24 години)
+        active_users = session.query(User).filter(
+            User.last_active >= datetime.utcnow() - timedelta(days=1),
+            User.id != duel.initiator_id,
+            User.id != duel.opponent_id
+        ).limit(20).all()  # Обмежуємо кількість для уникнення спаму
+        
+        notification_count = 0
+        for user in active_users:
+            try:
+                await bot.send_message(
+                    user.id,
+                    f"{EMOJI['vs']} <b>Нова дуель жартів!</b>\n\n{duel_text}",
+                    reply_markup=keyboard
+                )
+                notification_count += 1
+                await asyncio.sleep(0.1)  # Пауза для уникнення rate limit
+            except Exception as e:
+                logger.debug(f"Не вдалося повідомити користувача {user.id}: {e}")
+                continue
+        
+        logger.info(f"📢 Дуель {duel.id} розіслано {notification_count} користувачам")
 
 async def vote_in_duel(duel_id: int, voter_id: int, vote_for: str) -> dict:
-    """Голосування в дуелі"""
+    """Голосування в дуелі з нарахуванням балів"""
     with get_db_session() as session:
         # Перевірка чи існує дуель
         duel = session.query(Duel).filter(
@@ -173,6 +239,7 @@ async def vote_in_duel(duel_id: int, voter_id: int, vote_for: str) -> dict:
         
         # Перевірка часу голосування
         if datetime.utcnow() > duel.voting_ends_at:
+            # Автоматично завершити дуель
             await finish_duel(duel_id)
             return {"success": False, "message": "Час голосування вичерпано"}
         
@@ -211,7 +278,7 @@ async def vote_in_duel(duel_id: int, voter_id: int, vote_for: str) -> dict:
         
         return {
             "success": True,
-            "message": "Голос зараховано!",
+            "message": f"Голос зараховано! +2 бали",
             "initiator_votes": duel.initiator_votes,
             "opponent_votes": duel.opponent_votes
         }
@@ -222,7 +289,7 @@ async def finish_duel(duel_id: int):
         duel = session.query(Duel).filter(Duel.id == duel_id).first()
         
         if not duel or duel.status != DuelStatus.ACTIVE:
-            return
+            return None
         
         # Визначення переможця
         if duel.initiator_votes > duel.opponent_votes:
@@ -240,12 +307,12 @@ async def finish_duel(duel_id: int):
         duel.winner_id = winner_id
         duel.completed_at = datetime.utcnow()
         
-        # Оновлення статистики користувачів
+        # Оновлення статистики учасників
         initiator = session.query(User).filter(User.id == duel.initiator_id).first()
         if initiator:
             if winner_id == duel.initiator_id:
                 initiator.duels_won += 1
-                await update_user_points(duel.initiator_id, 15, "перемога в дуелі")
+                await update_user_points(duel.initiator_id, settings.POINTS_FOR_DUEL_WIN, "перемога в дуелі")
             else:
                 initiator.duels_lost += 1
         
@@ -254,7 +321,7 @@ async def finish_duel(duel_id: int):
             if opponent:
                 if winner_id == duel.opponent_id:
                     opponent.duels_won += 1
-                    await update_user_points(duel.opponent_id, 15, "перемога в дуелі")
+                    await update_user_points(duel.opponent_id, settings.POINTS_FOR_DUEL_WIN, "перемога в дуелі")
                 else:
                     opponent.duels_lost += 1
         
@@ -278,13 +345,13 @@ async def callback_duel_info(callback_query: CallbackQuery):
         f"{EMOJI['vs']} <b>ЯК ПРАЦЮЮТЬ ДУЕЛІ:</b>\n\n"
         f"{EMOJI['fire']} <b>1. Створення дуелі</b>\n"
         f"• Обери свій жарт або випадковий\n"
-        f"• Система знайде опонента\n\n"
+        f"• Система знайде опонента з бази\n\n"
         f"{EMOJI['brain']} <b>2. Голосування</b>\n"
         f"• Тривалість: {settings.DUEL_VOTING_TIME // 60} хвилин\n"
         f"• Голосують інші користувачі\n"
         f"• Учасники дуелі не голосують\n\n"
         f"{EMOJI['trophy']} <b>3. Нагороди</b>\n"
-        f"• Переможець: +15 балів\n"
+        f"• Переможець: +{settings.POINTS_FOR_DUEL_WIN} балів\n"
         f"• Кожен голос: +2 бали\n"
         f"• Мінімум {settings.MIN_VOTES_FOR_DUEL} голосів для дійсності\n\n"
         f"{EMOJI['star']} <b>Готовий до батлу?</b>"
@@ -308,7 +375,9 @@ async def callback_duel_with_my_joke(callback_query: CallbackQuery, state: FSMCo
         f"{EMOJI['brain']} <b>Надішли свій анекдот для дуелі!</b>\n\n"
         f"{EMOJI['fire']} Напиши найсмішніший жарт\n"
         f"{EMOJI['star']} Максимум {settings.MAX_JOKE_LENGTH} символів\n"
-        f"{EMOJI['time']} Час на відповідь: 2 хвилини"
+        f"{EMOJI['time']} Час на відповідь: 2 хвилини\n\n"
+        f"{EMOJI['thinking']} <b>Приклад:</b>\n"
+        f"Чому програмісти п'ють каву? Бо без неї код не компілюється!"
     )
     
     await state.set_state(DuelStates.waiting_for_joke)
@@ -318,46 +387,33 @@ async def callback_duel_with_random_joke(callback_query: CallbackQuery):
     """Дуель з випадковим жартом"""
     user_id = callback_query.from_user.id
     
-    # Отримання випадкового анекдоту користувача
+    # Отримання випадкового анекдоту
     random_joke = await get_random_joke()
     
     if not random_joke:
         await callback_query.message.edit_text(
             f"{EMOJI['cross']} <b>Не знайдено жартів для дуелі!</b>\n\n"
-            f"{EMOJI['thinking']} Спочатку додай кілька анекдотів через /submit"
+            f"{EMOJI['thinking']} База контенту порожня. Спробуй пізніше!"
         )
         await callback_query.answer()
         return
     
-    # Створення дуелі
-    duel = await create_duel_with_content(user_id, random_joke, callback_query.bot)
-    
-    # Знаходження контенту опонента
-    opponent_content = await find_opponent_content()
-    
-    if opponent_content:
-        with get_db_session() as session:
-            duel_obj = session.query(Duel).filter(Duel.id == duel.id).first()
-            duel_obj.opponent_content_id = opponent_content.id
-            duel_obj.opponent_id = opponent_content.author_id
-            session.commit()
+    try:
+        # Створення дуелі
+        duel = await create_duel_with_content(user_id, random_joke, callback_query.bot)
         
         # Початок голосування
-        await start_duel_voting(duel, callback_query.bot)
+        await start_duel_voting(duel, callback_query.bot, callback_query.message)
         
+        await callback_query.answer(f"{EMOJI['check']} Дуель створена!")
+        
+    except Exception as e:
+        logger.error(f"Помилка створення дуелі: {e}")
         await callback_query.message.edit_text(
-            f"{EMOJI['check']} <b>Дуель створена!</b>\n\n"
-            f"{EMOJI['vs']} Твій жарт проти випадкового опонента\n"
-            f"{EMOJI['time']} Голосування триває {settings.DUEL_VOTING_TIME // 60} хвилин\n"
-            f"{EMOJI['fire']} Удачі в батлі!"
-        )
-    else:
-        await callback_query.message.edit_text(
-            f"{EMOJI['cross']} <b>Не знайдено опонента!</b>\n\n"
+            f"{EMOJI['cross']} <b>Помилка створення дуелі!</b>\n\n"
             f"{EMOJI['thinking']} Спробуй пізніше"
         )
-    
-    await callback_query.answer()
+        await callback_query.answer()
 
 async def handle_duel_joke_submission(message: Message, state: FSMContext):
     """Обробка жарту для дуелі"""
@@ -384,21 +440,12 @@ async def handle_duel_joke_submission(message: Message, state: FSMContext):
         
         content_id = temp_content.id
     
-    # Створення дуелі
-    duel = await create_duel_with_content(user_id, temp_content, message.bot)
-    
-    # Знаходження опонента
-    opponent_content = await find_opponent_content()
-    
-    if opponent_content:
-        with get_db_session() as session:
-            duel_obj = session.query(Duel).filter(Duel.id == duel.id).first()
-            duel_obj.opponent_content_id = opponent_content.id
-            duel_obj.opponent_id = opponent_content.author_id
-            session.commit()
+    try:
+        # Створення дуелі
+        duel = await create_duel_with_content(user_id, temp_content, message.bot)
         
         # Початок голосування
-        await start_duel_voting(duel, message.bot)
+        await start_duel_voting(duel, message.bot, message)
         
         await message.answer(
             f"{EMOJI['check']} <b>Дуель створена!</b>\n\n"
@@ -406,9 +453,11 @@ async def handle_duel_joke_submission(message: Message, state: FSMContext):
             f"{EMOJI['vs']} Початок батлу!\n"
             f"{EMOJI['time']} Голосування триває {settings.DUEL_VOTING_TIME // 60} хвилин"
         )
-    else:
+        
+    except Exception as e:
+        logger.error(f"Помилка створення дуелі: {e}")
         await message.answer(
-            f"{EMOJI['cross']} <b>Не знайдено опонента!</b>\n\n"
+            f"{EMOJI['cross']} <b>Не вдалося створити дуель!</b>\n\n"
             f"{EMOJI['thinking']} Спробуй пізніше"
         )
     
@@ -484,6 +533,14 @@ async def callback_duel_results(callback_query: CallbackQuery):
     
     await callback_query.answer(results_text, show_alert=True)
 
+async def callback_start_new_duel(callback_query: CallbackQuery):
+    """Callback для початку нової дуелі"""
+    await callback_query.message.answer(
+        f"{EMOJI['vs']} <b>Створюємо нову дуель!</b>\n\n"
+        f"Використай команду /duel для початку"
+    )
+    await callback_query.answer()
+
 def register_duel_handlers(dp: Dispatcher):
     """Реєстрація хендлерів дуелей"""
     
@@ -499,3 +556,4 @@ def register_duel_handlers(dp: Dispatcher):
     dp.callback_query.register(callback_duel_with_random_joke, F.data == "duel_with_random_joke")
     dp.callback_query.register(callback_vote_duel, F.data.startswith("vote_duel:"))
     dp.callback_query.register(callback_duel_results, F.data.startswith("duel_results:"))
+    dp.callback_query.register(callback_start_new_duel, F.data == "start_new_duel")

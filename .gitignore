@@ -437,4 +437,6 @@ performance_*
 !.gitkeep
 !logs/.gitkeep
 !data/.gitkeep
-!backups/.gitkeep
+!backups/.gitkeep.env 
+*.log 
+__pycache__/ 
