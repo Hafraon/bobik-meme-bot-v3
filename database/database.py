@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Ініціалізація та робота з базою даних 🧠😂🔥
+🧠😂🔥 Ініціалізація та робота з базою даних (ВИПРАВЛЕНО створення адміна) 🧠😂🔥
 """
 
 import logging
@@ -60,9 +60,12 @@ def get_db_session():
         session.close()
 
 async def add_initial_data():
-    """Додавання початкових даних"""
+    """Додавання початкових даних з обов'язковим створенням адміністратора"""
     with get_db_session() as session:
-        # Перевірка чи є вже дані
+        # ✅ КРОК 1: Створюємо адміністратора якщо його немає
+        await ensure_admin_user_exists(session)
+        
+        # КРОК 2: Перевірка чи є вже дані
         existing_jokes = session.query(Content).filter_by(
             content_type=ContentType.JOKE,
             status=ContentStatus.APPROVED
@@ -79,10 +82,56 @@ async def add_initial_data():
         if existing_memes == 0:
             await add_sample_memes(session)
 
+async def ensure_admin_user_exists(session: Session):
+    """Створити користувача-адміністратора якщо його немає"""
+    try:
+        # Перевіряємо чи існує адміністратор
+        admin_user = session.query(User).filter(User.id == settings.ADMIN_ID).first()
+        
+        if not admin_user:
+            # Створюємо адміністратора з максимальними привілеями
+            admin_user = User(
+                id=settings.ADMIN_ID,
+                username="admin",
+                first_name="Головний Адміністратор",
+                last_name="Бота",
+                points=9999,
+                rank="🚀 Гумористичний Геній",
+                jokes_submitted=100,
+                jokes_approved=100,
+                memes_submitted=50,
+                memes_approved=50,
+                duels_won=25,
+                daily_subscription=True,
+                language_code="uk",
+                preferred_content_type="mixed",
+                reset_history_days=30,  # Адмін має довшу історію
+                created_at=datetime.utcnow(),
+                last_active=datetime.utcnow()
+            )
+            
+            session.add(admin_user)
+            session.commit()
+            
+            logger.info(f"👑 Створено користувача-адміністратора: ID {settings.ADMIN_ID}")
+        else:
+            # Оновлюємо інформацію адміністратора якщо потрібно
+            admin_user.last_active = datetime.utcnow()
+            if admin_user.rank != "🚀 Гумористичний Геній":
+                admin_user.rank = "🚀 Гумористичний Геній"
+                admin_user.points = max(admin_user.points, 9999)
+            
+            session.commit()
+            logger.info(f"✅ Адміністратор уже існує: ID {settings.ADMIN_ID}")
+            
+    except Exception as e:
+        logger.error(f"❌ Помилка створення адміністратора: {e}")
+        raise
+
 async def add_sample_jokes(session: Session):
     """Додавання зразкових анекдотів"""
     sample_jokes = [
-        "🧠 Приходить программіст до лікаря:\n- Доктор, в мене болить рука!\n- А де саме?\n- В лівому кліку! 😂",
+        "🧠 Приходить програміст до лікаря:\n- Доктор, в мене болить рука!\n- А де саме?\n- В лівому кліку! 😂",
         
         "🔥 Зустрічаються два українці:\n- Як справи?\n- Та нормально, працюю в IT.\n- А що робиш?\n- Борщ доставляю через додаток! 😂",
         
@@ -94,7 +143,7 @@ async def add_sample_jokes(session: Session):
         
         "😂 Син питає батька:\n- Тату, а що таке політика?\n- Це коли багато людей говорять, а нічого не роблять.\n- А що таке демократія?\n- Це коли всі мають право говорити, але слухає тільки мама! 🧠",
         
-        "🔥 Лікар пацієнтові:\n- Ви кури?\n- Ні.\n- П'єте?\n- Ні.\n- Тоді живіть як хочете - все одно довго протягнете! 😂",
+        "🔥 Лікар пацієнтові:\n- Ви курите?\n- Ні.\n- П'єте?\n- Ні.\n- Тоді живіть як хочете - все одно довго протягнете! 😂",
         
         "🧠 Заходить чоловік до аптеки:\n- Дайте щось від голови!\n- А що саме болить?\n- Дружина! 😂🔥",
         
@@ -108,9 +157,14 @@ async def add_sample_jokes(session: Session):
             content_type=ContentType.JOKE,
             text=joke_text,
             status=ContentStatus.APPROVED,
-            author_id=settings.ADMIN_ID,  # Від імені адміністратора
+            author_id=settings.ADMIN_ID,  # ✅ Тепер адміністратор точно існує!
             views=0,
-            likes=0
+            likes=0,
+            topic="life",  # Додаємо базову тематику
+            style="irony",  # Додаємо стиль
+            difficulty=1,
+            quality_score=0.9,  # Високий рейтинг для адміністраторського контенту
+            popularity_score=0.5
         )
         session.add(joke)
     
@@ -121,15 +175,21 @@ async def add_sample_memes(session: Session):
     sample_memes = [
         {
             "caption": "🧠 Коли нарешті зрозумів як працює async/await 😂",
-            "url": "https://i.imgur.com/placeholder1.jpg"
+            "url": "https://i.imgur.com/placeholder1.jpg",
+            "topic": "programming",
+            "style": "irony"
         },
         {
             "caption": "🔥 Настрій понеділка vs настрій п'ятниці 😂",
-            "url": "https://i.imgur.com/placeholder2.jpg"
+            "url": "https://i.imgur.com/placeholder2.jpg",
+            "topic": "work",
+            "style": "sarcasm"
         },
         {
             "caption": "🧠 Коли код працює з першого разу 😂🔥",
-            "url": "https://i.imgur.com/placeholder3.jpg"
+            "url": "https://i.imgur.com/placeholder3.jpg",
+            "topic": "programming",
+            "style": "absurd"
         }
     ]
     
@@ -139,9 +199,14 @@ async def add_sample_memes(session: Session):
             text=meme_data["caption"],
             file_url=meme_data["url"],
             status=ContentStatus.APPROVED,
-            author_id=settings.ADMIN_ID,
+            author_id=settings.ADMIN_ID,  # ✅ Тепер адміністратор точно існує!
             views=0,
-            likes=0
+            likes=0,
+            topic=meme_data["topic"],
+            style=meme_data["style"],
+            difficulty=1,
+            quality_score=0.9,
+            popularity_score=0.5
         )
         session.add(meme)
     
@@ -159,7 +224,10 @@ async def get_or_create_user(user_id: int, username: str = None, first_name: str
                 id=user_id,
                 username=username,
                 first_name=first_name,
-                last_name=last_name
+                last_name=last_name,
+                preferred_content_type="mixed",
+                reset_history_days=7,
+                last_history_reset=datetime.utcnow()
             )
             session.add(user)
             session.commit()
@@ -244,7 +312,12 @@ async def add_content_for_moderation(user_id: int, content_type: str, text: str,
             text=text,
             file_id=file_id,
             author_id=user_id,
-            status=ContentStatus.PENDING
+            status=ContentStatus.PENDING,
+            topic="life",  # Базова тематика для нового контенту
+            style="irony",
+            difficulty=1,
+            quality_score=0.5,
+            popularity_score=0.0
         )
         session.add(content)
         session.commit()
@@ -369,7 +442,7 @@ async def add_content_rating(user_id: int, content_id: int, action_type: str, po
             elif action_type == "dislike":
                 content.dislikes += 1
             elif action_type == "share":
-                content.likes += 1  # Поки що як лайк
+                content.shares += 1
         
         session.commit()
         return True
@@ -397,3 +470,25 @@ async def get_leaderboard(limit: int = 10) -> List[User]:
     """Отримання таблиці лідерів"""
     with get_db_session() as session:
         return session.query(User).order_by(User.points.desc()).limit(limit).all()
+
+# ===== НОВІ ФУНКЦІЇ ДЛЯ ПЕРСОНАЛІЗАЦІЇ =====
+
+async def get_trending_content(content_type: str, limit: int = 5) -> List[Content]:
+    """Отримати трендовий контент"""
+    with get_db_session() as session:
+        ct = ContentType.JOKE if content_type == "joke" else ContentType.MEME
+        
+        return session.query(Content).filter(
+            Content.content_type == ct,
+            Content.status == ContentStatus.APPROVED
+        ).order_by(Content.trending_score.desc()).limit(limit).all()
+
+async def get_popular_content(content_type: str, limit: int = 5) -> List[Content]:
+    """Отримати популярний контент"""
+    with get_db_session() as session:
+        ct = ContentType.JOKE if content_type == "joke" else ContentType.MEME
+        
+        return session.query(Content).filter(
+            Content.content_type == ct,
+            Content.status == ContentStatus.APPROVED
+        ).order_by(Content.popularity_score.desc()).limit(limit).all()
