@@ -18,22 +18,30 @@ def register_handlers(dp: Dispatcher):
         register_basic_handlers(dp)
         logger.info("✅ Зареєстровано основні команди")
         
-        # 2. Гейміфікація (profile, top, daily) - до контенту!
+        # 2. АДМІН-ПАНЕЛЬ (admin, m) - одразу після основних команд!
+        try:
+            from handlers.admin_panel_handlers import register_admin_handlers
+            register_admin_handlers(dp)
+            logger.info("✅ Зареєстровано адмін-панель")
+        except ImportError as e:
+            logger.warning(f"⚠️ Адмін-панель не завантажена: {e}")
+        
+        # 3. Гейміфікація (profile, top, daily) - до контенту!
         from handlers.gamification_handlers import register_gamification_handlers
         register_gamification_handlers(dp)
         logger.info("✅ Зареєстровано гейміфікацію")
         
-        # 3. Контент (meme, anekdot, submit) - після гейміфікації
+        # 4. Контент (meme, anekdot, submit) - після гейміфікації
         from handlers.content_handlers import register_content_handlers
         register_content_handlers(dp)
         logger.info("✅ Зареєстровано контент-хендлери")
         
-        # 4. Модерація (approve, reject) - тільки для адміна
+        # 5. Модерація (approve, reject) - тільки для адміна
         from handlers.moderation_handlers import register_moderation_handlers
         register_moderation_handlers(dp)
         logger.info("✅ Зареєстровано модерацію")
         
-        # 5. Дуелі (duel) - в кінці
+        # 6. Дуелі (duel) - в кінці
         from handlers.duel_handlers import register_duel_handlers
         register_duel_handlers(dp)
         logger.info("✅ Зареєстровано дуелі")

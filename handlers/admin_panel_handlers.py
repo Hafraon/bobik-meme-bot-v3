@@ -15,7 +15,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 )
 
-from settings import settings, EMOJI
+from config.settings import settings, EMOJI
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,7 @@ async def handle_admin_static_buttons(message: Message):
 async def show_quick_stats(message: Message):
     """Швидка статистика для /m"""
     try:
-        from database import get_db_session
+        from database.database import get_db_session
         
         with get_db_session() as session:
             from database.models import User, Content, Rating
@@ -175,10 +175,10 @@ async def show_quick_stats(message: Message):
 async def show_detailed_stats(message: Message):
     """Детальна статистика"""
     try:
-        from database import get_db_session
+        from database.database import get_db_session
         
         with get_db_session() as session:
-            from database.models import User, Content, Rating, ContentView
+            from database.models import User, Content, Rating
             
             # Загальна статистика
             total_users = session.query(User).count()
@@ -188,10 +188,6 @@ async def show_detailed_stats(message: Message):
             
             # Статистика за сьогодні
             today = datetime.utcnow().date()
-            today_views = session.query(ContentView).filter(
-                ContentView.viewed_at >= datetime.combine(today, datetime.min.time())
-            ).count() if 'ContentView' in locals() else 0
-            
             today_ratings = session.query(Rating).filter(
                 Rating.created_at >= datetime.combine(today, datetime.min.time())
             ).count()
@@ -213,7 +209,6 @@ async def show_detailed_stats(message: Message):
             f"• Схвалено: {approved_content}\n"
             f"• На модерації: {pending_content}\n\n"
             f"📊 <b>Сьогодні:</b>\n"
-            f"• Переглядів: {today_views}\n"
             f"• Оцінок: {today_ratings}\n\n"
             f"🏆 <b>Топ користувачі:</b>\n"
         )
@@ -244,155 +239,90 @@ async def show_detailed_stats(message: Message):
 async def show_moderation_interface(message: Message):
     """Інтерфейс модерації"""
     try:
-        from database import get_pending_content
+        # Спробуємо отримати контент на модерації
+        from database.database import get_db_session
         
-        pending_content = await get_pending_content()
-        
-        if not pending_content:
-            await message.answer(
-                f"{EMOJI['check']} <b>Немає контенту на модерації!</b>\n\n"
-                f"🎉 Всі подання перевірено",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_moderate")
-                ]])
+        with get_db_session() as session:
+            from database.models import Content, User
+            
+            pending_content = session.query(Content).filter(Content.status == "pending").all()
+            
+            if not pending_content:
+                await message.answer(
+                    f"{EMOJI['check']} <b>Немає контенту на модерації!</b>\n\n"
+                    f"🎉 Всі подання перевірено",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_moderate")
+                    ]])
+                )
+                return
+            
+            content = pending_content[0]  # Перший в черзі
+            
+            # Отримуємо інформацію про автора
+            author = session.query(User).filter(User.id == content.author_id).first()
+            
+            author_name = "Невідомий"
+            author_stats = "Статистика недоступна"
+            
+            if author:
+                author_name = author.first_name or author.username or f"ID{author.id}"
+                author_stats = f"Балів: {author.points}"
+            
+            content_type = "Анекдот" if content.content_type == "joke" else "Мем"
+            
+            moderation_text = (
+                f"{EMOJI['brain']} <b>МОДЕРАЦІЯ КОНТЕНТУ</b>\n\n"
+                f"📝 <b>Тип:</b> {content_type}\n"
+                f"👤 <b>Автор:</b> {author_name}\n"
+                f"📊 <b>Статистика:</b> {author_stats}\n"
+                f"🕐 <b>Надіслано:</b> {content.created_at.strftime('%d.%m.%Y %H:%M')}\n\n"
+                f"📄 <b>Контент:</b>\n{content.text}\n\n"
+                f"⏳ <b>В черзі:</b> {len(pending_content)} елементів"
             )
-            return
-        
-        content = pending_content[0]  # Перший в черзі
-        
-        # Отримуємо інформацію про автора
-        try:
-            from database import get_db_session
-            with get_db_session() as session:
-                from database.models import User
-                author = session.query(User).filter(User.id == content.author_id).first()
-        except:
-            author = None
-        
-        author_name = "Невідомий"
-        author_stats = "Статистика недоступна"
-        
-        if author:
-            author_name = author.first_name or author.username or f"ID{author.id}"
-            author_stats = f"Балів: {author.points} | Схвалено: {author.jokes_approved + author.memes_approved}"
-        
-        content_type = "Анекдот" if content.content_type.value == "joke" else "Мем"
-        
-        moderation_text = (
-            f"{EMOJI['brain']} <b>МОДЕРАЦІЯ КОНТЕНТУ</b>\n\n"
-            f"📝 <b>Тип:</b> {content_type}\n"
-            f"👤 <b>Автор:</b> {author_name}\n"
-            f"📊 <b>Статистика:</b> {author_stats}\n"
-            f"🕐 <b>Надіслано:</b> {content.created_at.strftime('%d.%m.%Y %H:%M')}\n\n"
-            f"📄 <b>Контент:</b>\n{content.text}\n\n"
-            f"⏳ <b>В черзі:</b> {len(pending_content)} елементів"
-        )
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Схвалити", callback_data=f"approve_{content.id}"),
-                InlineKeyboardButton(text="❌ Відхилити", callback_data=f"reject_{content.id}")
-            ],
-            [
-                InlineKeyboardButton(text="⏭️ Наступний", callback_data="admin_moderate"),
-                InlineKeyboardButton(text="👤 Профіль автора", callback_data=f"user_profile_{content.author_id}")
-            ],
-            [
-                InlineKeyboardButton(text="📝 З коментарем", callback_data=f"reject_comment_{content.id}"),
-                InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_moderate")
-            ]
-        ])
-        
-        await message.answer(moderation_text, reply_markup=keyboard)
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Схвалити", callback_data=f"approve_{content.id}"),
+                    InlineKeyboardButton(text="❌ Відхилити", callback_data=f"reject_{content.id}")
+                ],
+                [
+                    InlineKeyboardButton(text="⏭️ Наступний", callback_data="admin_moderate"),
+                    InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_moderate")
+                ]
+            ])
+            
+            await message.answer(moderation_text, reply_markup=keyboard)
         
     except Exception as e:
         logger.error(f"Помилка модерації: {e}")
         await message.answer(f"❌ Помилка модерації: {e}")
 
-# ===== ФУНКЦІЇ УПРАВЛІННЯ КОРИСТУВАЧАМИ =====
+# ===== STUB ФУНКЦІЇ (поки не реалізовані) =====
 
 async def show_users_management(message: Message):
-    """Управління користувачами"""
-    try:
-        from database import get_db_session
-        
-        with get_db_session() as session:
-            from database.models import User
-            
-            # Статистика користувачів
-            total_users = session.query(User).count()
-            active_today = session.query(User).filter(
-                User.last_active >= datetime.utcnow().date()
-            ).count()
-            
-            # Нові користувачі за тиждень
-            week_ago = datetime.utcnow() - timedelta(days=7)
-            new_users = session.query(User).filter(User.created_at >= week_ago).count()
-            
-            # Топ активні
-            top_active = session.query(User).order_by(User.points.desc()).limit(5).all()
-        
-        users_text = (
-            f"{EMOJI['crown']} <b>УПРАВЛІННЯ КОРИСТУВАЧАМИ</b>\n\n"
-            f"📊 <b>Загальна статистика:</b>\n"
-            f"• Всього користувачів: {total_users}\n"
-            f"• Активні сьогодні: {active_today}\n"
-            f"• Нові за тиждень: {new_users}\n\n"
-            f"🏆 <b>Топ за балами:</b>\n"
-        )
-        
-        for i, user in enumerate(top_active, 1):
-            name = user.first_name or user.username or f"ID{user.id}"
-            users_text += f"{i}. {name}: {user.points} балів\n"
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🆕 Нові користувачі", callback_data="admin_new_users"),
-                InlineKeyboardButton(text="📊 Топ користувачі", callback_data="admin_top_users")
-            ],
-            [
-                InlineKeyboardButton(text="💰 Нарахувати бали", callback_data="admin_add_points"),
-                InlineKeyboardButton(text="📢 Розсилка", callback_data="admin_broadcast")
-            ],
-            [
-                InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_users")
-            ]
-        ])
-        
-        await message.answer(users_text, reply_markup=keyboard)
-        
-    except Exception as e:
-        logger.error(f"Помилка управління користувачами: {e}")
-        await message.answer(f"❌ Помилка: {e}")
+    """Управління користувачами - поки заглушка"""
+    await message.answer(f"{EMOJI['construction']} Функція в розробці...")
 
-# ===== ДОДАТКОВІ ФУНКЦІЇ =====
+async def show_content_analytics(message: Message):
+    """Аналітика контенту - поки заглушка"""
+    await message.answer(f"{EMOJI['construction']} Функція в розробці...")
 
 async def show_trending_content(message: Message):
-    """Трендовий контент"""
-    try:
-        from database import get_trending_content
-        
-        trending_jokes = await get_trending_content("joke", 5)
-        trending_memes = await get_trending_content("meme", 5)
-        
-        response = f"{EMOJI['fire']} <b>ТРЕНДОВИЙ КОНТЕНТ</b>\n\n"
-        
-        if trending_jokes:
-            response += f"🧠 <b>Трендові анекдоти:</b>\n"
-            for i, joke in enumerate(trending_jokes, 1):
-                response += f"{i}. 👁️{joke.views} ❤️{joke.likes} - {joke.text[:50]}...\n"
-            response += "\n"
-        
-        if trending_memes:
-            response += f"😂 <b>Трендові меми:</b>\n"
-            for i, meme in enumerate(trending_memes, 1):
-                response += f"{i}. 👁️{meme.views} ❤️{meme.likes} - {meme.text[:50]}...\n"
-        
-        await message.answer(response)
-        
-    except Exception as e:
-        logger.error(f"Помилка трендового контенту: {e}")
-        await message.answer(f"❌ Помилка: {e}")
+    """Трендовий контент - поки заглушка"""
+    await message.answer(f"{EMOJI['construction']} Функція в розробці...")
+
+async def show_bot_settings(message: Message):
+    """Налаштування бота - поки заглушка"""
+    await message.answer(f"{EMOJI['construction']} Функція в розробці...")
+
+async def show_bulk_actions(message: Message):
+    """Масові дії - поки заглушка"""
+    await message.answer(f"{EMOJI['construction']} Функція в розробці...")
+
+async def show_backup_options(message: Message):
+    """Бекап - поки заглушка"""
+    await message.answer(f"{EMOJI['construction']} Функція в розробці...")
 
 async def disable_admin_menu(message: Message):
     """Вимкнути статичне адмін-меню"""
@@ -412,7 +342,6 @@ async def callback_admin_stats(callback_query: CallbackQuery):
         await callback_query.answer("Доступ заборонено!")
         return
     
-    # Використовуємо існуючу функцію
     await show_detailed_stats(callback_query.message)
     await callback_query.answer()
 
@@ -435,13 +364,22 @@ async def callback_approve_content(callback_query: CallbackQuery):
         content_id = int(callback_query.data.split("_")[1])
         
         # Схвалюємо контент в БД
-        from database import moderate_content
-        await moderate_content(content_id, callback_query.from_user.id, True)
+        from database.database import get_db_session
         
-        await callback_query.answer(f"{EMOJI['check']} Контент схвалено!")
-        
-        # Показуємо наступний контент
-        await show_moderation_interface(callback_query.message)
+        with get_db_session() as session:
+            from database.models import Content
+            
+            content = session.query(Content).filter(Content.id == content_id).first()
+            if content:
+                content.status = "approved"
+                session.commit()
+                
+                await callback_query.answer(f"{EMOJI['check']} Контент схвалено!")
+                
+                # Показуємо наступний контент
+                await show_moderation_interface(callback_query.message)
+            else:
+                await callback_query.answer("Контент не знайдено")
         
     except Exception as e:
         logger.error(f"Помилка схвалення: {e}")
@@ -457,13 +395,22 @@ async def callback_reject_content(callback_query: CallbackQuery):
         content_id = int(callback_query.data.split("_")[1])
         
         # Відхиляємо контент в БД
-        from database import moderate_content
-        await moderate_content(content_id, callback_query.from_user.id, False)
+        from database.database import get_db_session
         
-        await callback_query.answer(f"{EMOJI['cross']} Контент відхилено!")
-        
-        # Показуємо наступний контент
-        await show_moderation_interface(callback_query.message)
+        with get_db_session() as session:
+            from database.models import Content
+            
+            content = session.query(Content).filter(Content.id == content_id).first()
+            if content:
+                content.status = "rejected"
+                session.commit()
+                
+                await callback_query.answer(f"{EMOJI['cross']} Контент відхилено!")
+                
+                # Показуємо наступний контент
+                await show_moderation_interface(callback_query.message)
+            else:
+                await callback_query.answer("Контент не знайдено")
         
     except Exception as e:
         logger.error(f"Помилка відхилення: {e}")

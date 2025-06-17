@@ -11,7 +11,7 @@ from aiogram import Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
-from settings import settings, EMOJI, TEXTS
+from config.settings import settings, EMOJI, TEXTS
 
 logger = logging.getLogger(__name__)
 
@@ -32,29 +32,41 @@ async def cmd_start(message: Message):
     except Exception as e:
         logger.warning(f"Не вдалося створити користувача: {e}")
     
-    # НОВЕ! Перевіряємо чи це адмін і показуємо адмін-меню
+    # 🔥 ПЕРЕВІРЯЄМО ЧИ ЦЕ АДМІН І ПОКАЗУЄМО АДМІН-МЕНЮ
     try:
         from handlers.admin_panel_handlers import auto_show_admin_menu_on_start
         admin_menu_shown = await auto_show_admin_menu_on_start(message)
         
         if admin_menu_shown:
-            # Для адміна показуємо скорочене привітання + основне меню
+            # ✅ Для адміна показуємо тільки коротке основне меню
             keyboard = get_main_menu_keyboard()
             await message.answer(
-                f"{EMOJI['fire']} Вітаю, {first_name}!\n\n"
-                f"Ви в режимі адміністратора з розширеними можливостями.\n"
-                f"Використовуйте кнопки меню нижче або основне меню:",
+                f"{EMOJI['brain']} <b>Основне меню користувачів:</b>",
                 reply_markup=keyboard
             )
+            logger.info(f"👑 Адмін {user_id} ({first_name}) запустив бота з адмін-меню")
             return
     except ImportError:
-        pass  # Адмін-панель поки не доступна
+        logger.warning("⚠️ Адмін-панель не доступна, працюю без неї")
+    except Exception as e:
+        logger.error(f"❌ Помилка адмін-панелі: {e}")
     
-    # Звичайне привітання для користувачів
+    # 👤 ЗВИЧАЙНЕ ПРИВІТАННЯ ДЛЯ КОРИСТУВАЧІВ
     keyboard = get_main_menu_keyboard()
     
+    # Контекстне привітання за часом дня
+    current_hour = datetime.now().hour
+    if 6 <= current_hour < 12:
+        time_greeting = "Доброго ранку"
+    elif 12 <= current_hour < 18:
+        time_greeting = "Гарного дня"
+    elif 18 <= current_hour < 23:
+        time_greeting = "Доброго вечора"
+    else:
+        time_greeting = "Доброї ночі"
+    
     welcome_text = (
-        f"{EMOJI['brain']}{EMOJI['laugh']}{EMOJI['fire']} <b>Вітаю, {first_name}!</b>\n\n"
+        f"{EMOJI['brain']}{EMOJI['laugh']}{EMOJI['fire']} <b>{time_greeting}, {first_name}!</b>\n\n"
         f"Ласкаво просимо до українського бота мемів та анекдотів!\n\n"
         f"{EMOJI['star']} <b>Що я вмію:</b>\n"
         f"{EMOJI['laugh']} Випадкові меми (+1 бал)\n"
@@ -75,8 +87,8 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Головне меню бота"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=f"{EMOJI['laugh']} Мем", callback_data="get_meme"),
-            InlineKeyboardButton(text=f"{EMOJI['brain']} Анекдот", callback_data="get_joke")
+            InlineKeyboardButton(text=f"{EMOJI['laugh']} Мем (+1)", callback_data="get_meme"),
+            InlineKeyboardButton(text=f"{EMOJI['brain']} Анекдот (+1)", callback_data="get_joke")
         ],
         [
             InlineKeyboardButton(text=f"{EMOJI['profile']} Профіль", callback_data="show_profile"),
@@ -84,10 +96,10 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text=f"{EMOJI['calendar']} Щоденна розсилка", callback_data="toggle_daily"),
-            InlineKeyboardButton(text=f"{EMOJI['fire']} Надіслати жарт", callback_data="submit_content")
+            InlineKeyboardButton(text=f"{EMOJI['fire']} Надіслати жарт (+{settings.POINTS_FOR_SUBMISSION})", callback_data="submit_content")
         ],
         [
-            InlineKeyboardButton(text=f"{EMOJI['vs']} Дуель", callback_data="start_duel"),
+            InlineKeyboardButton(text=f"{EMOJI['vs']} Дуель (+{settings.POINTS_FOR_DUEL_WIN})", callback_data="start_duel"),
             InlineKeyboardButton(text=f"{EMOJI['help']} Допомога", callback_data="show_help")
         ]
     ])
@@ -169,14 +181,20 @@ async def cmd_stats(message: Message):
 
 async def callback_get_meme(callback_query: CallbackQuery):
     """Callback для отримання мему"""
-    from handlers.content_handlers import send_personalized_meme
-    await send_personalized_meme(callback_query.message, from_callback=True)
+    try:
+        from handlers.content_handlers import send_personalized_meme
+        await send_personalized_meme(callback_query.message, from_callback=True)
+    except ImportError:
+        await callback_query.message.answer("🔄 Функція мемів завантажується...")
     await callback_query.answer()
 
 async def callback_get_joke(callback_query: CallbackQuery):
     """Callback для отримання анекдоту"""
-    from handlers.content_handlers import send_personalized_joke
-    await send_personalized_joke(callback_query.message, from_callback=True)
+    try:
+        from handlers.content_handlers import send_personalized_joke
+        await send_personalized_joke(callback_query.message, from_callback=True)
+    except ImportError:
+        await callback_query.message.answer("🔄 Функція анекдотів завантажується...")
     await callback_query.answer()
 
 async def callback_show_profile(callback_query: CallbackQuery):
