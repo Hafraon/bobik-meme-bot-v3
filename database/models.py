@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Розширені моделі бази даних (сумісні з існуючими) 🧠😂🔥
+🧠😂🔥 Розширені моделі бази даних (ВИПРАВЛЕНІ RELATIONSHIPS) 🧠😂🔥
 """
 
 from datetime import datetime, timedelta
@@ -77,14 +77,41 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_active = Column(DateTime, default=datetime.utcnow)
     
-    # Зв'язки
-    submissions = relationship("Content", back_populates="author")
+    # ✅ ВИПРАВЛЕНІ ЗВ'ЯЗКИ з чіткими foreign_keys!
+    submissions = relationship(
+        "Content", 
+        foreign_keys="Content.author_id",
+        back_populates="author"
+    )
+    moderated_content = relationship(
+        "Content", 
+        foreign_keys="Content.moderator_id",
+        back_populates="moderator"
+    )
     ratings = relationship("Rating", back_populates="user")
-    duel_initiations = relationship("Duel", foreign_keys="Duel.initiator_id", back_populates="initiator")
-    duel_participations = relationship("Duel", foreign_keys="Duel.opponent_id", back_populates="opponent")
+    duel_initiations = relationship(
+        "Duel", 
+        foreign_keys="Duel.initiator_id", 
+        back_populates="initiator"
+    )
+    duel_participations = relationship(
+        "Duel", 
+        foreign_keys="Duel.opponent_id", 
+        back_populates="opponent"
+    )
+    duel_wins = relationship(
+        "Duel", 
+        foreign_keys="Duel.winner_id", 
+        back_populates="winner"
+    )
     votes = relationship("DuelVote", back_populates="voter")
     content_views = relationship("ContentView", back_populates="user")  # НОВЕ!
     preferences = relationship("UserPreference", back_populates="user")  # НОВЕ!
+    admin_actions = relationship(
+        "AdminAction", 
+        foreign_keys="AdminAction.admin_id",
+        back_populates="admin"
+    )
     
     def __repr__(self):
         return f"<User(id={self.id}, username={self.username}, points={self.points})>"
@@ -129,9 +156,17 @@ class Content(Base):
     moderated_at = Column(DateTime, nullable=True)
     last_shown = Column(DateTime, nullable=True)  # НОВЕ! Коли востаннє показували
     
-    # Зв'язки
-    author = relationship("User", foreign_keys=[author_id], back_populates="submissions")
-    moderator = relationship("User", foreign_keys=[moderator_id])
+    # ✅ ВИПРАВЛЕНІ ЗВ'ЯЗКИ з чіткими foreign_keys!
+    author = relationship(
+        "User", 
+        foreign_keys=[author_id], 
+        back_populates="submissions"
+    )
+    moderator = relationship(
+        "User", 
+        foreign_keys=[moderator_id],
+        back_populates="moderated_content"
+    )
     ratings = relationship("Rating", back_populates="content")
     content_views = relationship("ContentView", back_populates="content")  # НОВЕ!
     
@@ -230,7 +265,7 @@ class ContentPopularity(Base):
     def __repr__(self):
         return f"<ContentPopularity(content_id={self.content_id}, date={self.date})>"
 
-# ІСНУЮЧІ МОДЕЛІ ЗАЛИШАЮТЬСЯ БЕЗ ЗМІН
+# ІСНУЮЧІ МОДЕЛІ З ВИПРАВЛЕНИМИ RELATIONSHIPS
 class Rating(Base):
     """Модель оцінок контенту - РОЗШИРЕНА"""
     __tablename__ = "ratings"
@@ -289,12 +324,30 @@ class Duel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
     
-    # Зв'язки
-    initiator = relationship("User", foreign_keys=[initiator_id], back_populates="duel_initiations")
-    opponent = relationship("User", foreign_keys=[opponent_id], back_populates="duel_participations")
-    winner = relationship("User", foreign_keys=[winner_id])
-    initiator_content = relationship("Content", foreign_keys=[initiator_content_id])
-    opponent_content = relationship("Content", foreign_keys=[opponent_content_id])
+    # ✅ ВИПРАВЛЕНІ ЗВ'ЯЗКИ з чіткими foreign_keys!
+    initiator = relationship(
+        "User", 
+        foreign_keys=[initiator_id], 
+        back_populates="duel_initiations"
+    )
+    opponent = relationship(
+        "User", 
+        foreign_keys=[opponent_id], 
+        back_populates="duel_participations"
+    )
+    winner = relationship(
+        "User", 
+        foreign_keys=[winner_id],
+        back_populates="duel_wins"
+    )
+    initiator_content = relationship(
+        "Content", 
+        foreign_keys=[initiator_content_id]
+    )
+    opponent_content = relationship(
+        "Content", 
+        foreign_keys=[opponent_content_id]
+    )
     votes = relationship("DuelVote", back_populates="duel")
     
     def __repr__(self):
@@ -345,8 +398,12 @@ class AdminAction(Base):
     # Часова мітка
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    # Зв'язки
-    admin = relationship("User")
+    # ✅ ВИПРАВЛЕНИЙ ЗВ'ЯЗОК!
+    admin = relationship(
+        "User", 
+        foreign_keys=[admin_id],
+        back_populates="admin_actions"
+    )
     
     def __repr__(self):
         return f"<AdminAction(admin_id={self.admin_id}, action={self.action_type}, target={self.target_type}:{self.target_id})>"
