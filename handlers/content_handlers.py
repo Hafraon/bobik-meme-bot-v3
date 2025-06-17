@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Хендлери для роботи з контентом 🧠😂🔥
+🧠😂🔥 Персоналізовані хендлери для роботи з контентом 🧠😂🔥
 """
 
 import logging
 import random
 from datetime import datetime
-from typing import Dict, Set
+from typing import Dict, Set, Optional
 
 from aiogram import Dispatcher, F
 from aiogram.filters import Command
@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 class SubmissionStates(StatesGroup):
     waiting_for_content = State()
 
-# Глобальне сховище для відстеження показаних анекдотів/мемів
-# В продакшені це буде в БД або Redis
+# Глобальне сховище для відстеження показаних анекдотів/мемів (FALLBACK)
+# В продакшені це буде в БД через нові функції
 USER_SHOWN_JOKES: Dict[int, Set[int]] = {}
 USER_SHOWN_MEMES: Dict[int, Set[int]] = {}
 
@@ -66,8 +66,69 @@ SAMPLE_MEMES = [
     }
 ]
 
+# ===== НОВІ ФУНКЦІЇ ДЛЯ ПЕРСОНАЛІЗАЦІЇ =====
+
+async def get_personalized_content(user_id: int, content_type: str) -> Optional[dict]:
+    """Отримати персоналізований контент (БД + fallback)"""
+    try:
+        # Спробуємо використати нові персоналізовані функції
+        from database import get_recommended_content, record_content_view
+        
+        # Створюємо/оновлюємо користувача
+        await ensure_user_exists(user_id)
+        
+        # Отримуємо рекомендований контент
+        content_obj = await get_recommended_content(user_id, content_type)
+        
+        if content_obj:
+            # Записуємо перегляд
+            view_recorded = await record_content_view(user_id, content_obj.id, "command")
+            
+            return {
+                "text": content_obj.text,
+                "views": content_obj.views,
+                "likes": content_obj.likes,
+                "content_id": content_obj.id,
+                "is_new": view_recorded,
+                "topic": getattr(content_obj, 'topic', None),
+                "quality": getattr(content_obj, 'quality_score', 0.8)
+            }
+    except Exception as e:
+        logger.warning(f"Персоналізація недоступна: {e}")
+    
+    # FALLBACK - використовуємо стару логіку без повторів
+    if content_type == "joke":
+        joke_index, joke_text = get_random_joke_without_repeat(user_id)
+        return {
+            "text": joke_text,
+            "views": random.randint(50, 500),
+            "likes": random.randint(5, 50),
+            "content_id": None,
+            "is_new": True,
+            "topic": "life"
+        }
+    else:
+        meme_index, meme_data = get_random_meme_without_repeat(user_id)
+        return {
+            "text": meme_data["caption"],
+            "views": random.randint(80, 600),
+            "likes": random.randint(8, 60),
+            "content_id": None,
+            "is_new": True,
+            "topic": "life"
+        }
+
+async def ensure_user_exists(user_id: int):
+    """Переконатися що користувач існує в БД"""
+    try:
+        from database import get_or_create_user
+        # Дані користувача будуть отримані з Message пізніше
+        await get_or_create_user(user_id)
+    except:
+        pass  # Ігноруємо якщо БД недоступна
+
 def get_random_joke_without_repeat(user_id: int) -> tuple:
-    """Отримання випадкового анекдоту без повторів"""
+    """Отримання випадкового анекдоту без повторів (FALLBACK)"""
     global USER_SHOWN_JOKES
     
     # Ініціалізуємо користувача якщо потрібно
@@ -97,7 +158,7 @@ def get_random_joke_without_repeat(user_id: int) -> tuple:
     return joke_index, joke_text
 
 def get_random_meme_without_repeat(user_id: int) -> tuple:
-    """Отримання випадкового мему без повторів"""
+    """Отримання випадкового мему без повторів (FALLBACK)"""
     global USER_SHOWN_MEMES
     
     # Ініціалізуємо користувача якщо потрібно
@@ -126,34 +187,39 @@ def get_random_meme_without_repeat(user_id: int) -> tuple:
     
     return meme_index, meme_data
 
+# ===== ОСНОВНІ КОМАНДИ =====
+
 async def cmd_anekdot(message: Message):
     """Команда /anekdot"""
-    await send_joke(message)
+    await send_personalized_joke(message)
 
 async def cmd_meme(message: Message):
     """Команда /meme"""
-    await send_meme(message)
+    await send_personalized_meme(message)
 
-async def send_joke(message: Message, from_callback: bool = False):
-    """Надсилання випадкового анекдоту БЕЗ ПОВТОРІВ"""
+async def send_personalized_joke(message: Message, from_callback: bool = False):
+    """Надсилання персоналізованого анекдоту"""
     user_id = message.from_user.id
     
     try:
-        # Спробуємо отримати з БД
+        # Створюємо/оновлюємо користувача в БД
         try:
-            from database import get_random_joke
-            joke_obj = await get_random_joke()
-            if joke_obj:
-                joke_text = joke_obj.text
-                joke_views = getattr(joke_obj, 'views', 0)
-            else:
-                # Якщо БД порожня, використовуємо зразки БЕЗ ПОВТОРІВ
-                joke_index, joke_text = get_random_joke_without_repeat(user_id)
-                joke_views = random.randint(50, 500)  # Фейкові перегляди для демо
+            from database import get_or_create_user
+            await get_or_create_user(
+                user_id=user_id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name,
+                last_name=message.from_user.last_name
+            )
         except:
-            # Якщо БД не працює, використовуємо зразки БЕЗ ПОВТОРІВ
-            joke_index, joke_text = get_random_joke_without_repeat(user_id)
-            joke_views = random.randint(50, 500)  # Фейкові перегляди для демо
+            pass  # БД може бути недоступна
+        
+        # Отримуємо персоналізований контент
+        content_data = await get_personalized_content(user_id, "joke")
+        
+        if not content_data:
+            await message.answer(f"{EMOJI['cross']} Упс! Анекдоти закінчилися. Спробуй пізніше!")
+            return
         
         # Контекстне привітання залежно від часу
         current_hour = datetime.now().hour
@@ -166,64 +232,109 @@ async def send_joke(message: Message, from_callback: bool = False):
         else:
             greeting = random.choice(TIME_GREETINGS["night"])
         
-        # Клавіатура для взаємодії
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        # Створюємо розширену клавіатуру
+        keyboard_buttons = [
             [
-                InlineKeyboardButton(text=f"{EMOJI['like']} Подобається", callback_data="like_joke"),
-                InlineKeyboardButton(text=f"{EMOJI['dislike']} Не подобається", callback_data="dislike_joke")
+                InlineKeyboardButton(text=f"{EMOJI['like']} Подобається", 
+                                   callback_data=f"like_joke_{content_data.get('content_id', 0)}"),
+                InlineKeyboardButton(text=f"{EMOJI['dislike']} Не подобається", 
+                                   callback_data=f"dislike_joke_{content_data.get('content_id', 0)}")
             ],
             [
                 InlineKeyboardButton(text=f"{EMOJI['brain']} Ще анекдот", callback_data="get_joke"),
                 InlineKeyboardButton(text=f"{EMOJI['laugh']} Мем", callback_data="get_meme")
-            ],
-            [
-                InlineKeyboardButton(text=f"{EMOJI['fire']} Надіслати свій", callback_data="submit_joke")
             ]
+        ]
+        
+        # Додаємо кнопки для персоналізованого контенту
+        if content_data.get('content_id'):
+            keyboard_buttons.append([
+                InlineKeyboardButton(text=f"{EMOJI['fire']} Поділитися", 
+                                   callback_data=f"share_joke_{content_data['content_id']}"),
+                InlineKeyboardButton(text=f"📊 Топ анекдоти", callback_data="top_jokes")
+            ])
+        
+        keyboard_buttons.append([
+            InlineKeyboardButton(text=f"{EMOJI['star']} Надіслати свій", callback_data="submit_joke")
         ])
         
-        # Додаємо лічильник переглядів
-        views_text = f"👁️ {joke_views}"
-        response_text = f"{greeting}\n\n{joke_text}\n\n{views_text} • {EMOJI['star']} Сподобався анекдот? Оціни!"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        # Формуємо інформацію про контент
+        content_info = []
+        
+        # Додаємо тематичні емодзі
+        if content_data.get('topic'):
+            topic_emoji = {
+                "programming": "💻", 
+                "work": "🏢", 
+                "life": "🌍", 
+                "family": "👨‍👩‍👧‍👦",
+                "education": "🎓"
+            }.get(content_data['topic'], "📝")
+            content_info.append(f"{topic_emoji}")
+        
+        content_info.append(f"👁️ {content_data['views']}")
+        
+        if content_data['likes'] > 0:
+            content_info.append(f"❤️ {content_data['likes']}")
+        
+        # Персональні мітки
+        personal_tag = ""
+        if not content_data.get('is_new'):
+            personal_tag = f" {EMOJI['thinking']} (переглянуто)"
+        elif content_data.get('topic') in ['programming', 'work']:
+            personal_tag = f" {EMOJI['brain']} (рекомендовано)"
+        elif content_data.get('quality', 0) > 0.9:
+            personal_tag = f" {EMOJI['star']} (топ якість)"
+        
+        info_line = " • ".join(content_info) + personal_tag if content_info else personal_tag
+        
+        response_text = f"{greeting}\n\n{content_data['text']}\n\n{info_line}\n{EMOJI['star']} Сподобався анекдот? Оціни!"
         
         await message.answer(
             response_text,
             reply_markup=keyboard
         )
         
-        # Нарахування балів (якщо БД працює)
+        # Нарахування балів за перегляд
         try:
             from database import update_user_points
-            await update_user_points(user_id, 1, "перегляд анекдоту")
+            if content_data.get('is_new'):
+                await update_user_points(user_id, 1, "перегляд нового анекдоту")
         except:
             pass  # Ігноруємо помилки БД
         
         if not from_callback:
-            logger.info(f"🧠 Користувач {user_id} отримав анекдот без повтору")
+            logger.info(f"🧠 Користувач {user_id} отримав персоналізований анекдот")
             
     except Exception as e:
         logger.error(f"Помилка надсилання анекдоту: {e}")
         await message.answer(f"{EMOJI['cross']} Упс! Сталася помилка. Спробуй ще раз!")
 
-async def send_meme(message: Message, from_callback: bool = False):
-    """Надсилання випадкового мему БЕЗ ПОВТОРІВ"""
+async def send_personalized_meme(message: Message, from_callback: bool = False):
+    """Надсилання персоналізованого мему"""
     user_id = message.from_user.id
     
     try:
-        # Спробуємо отримати з БД
+        # Створюємо/оновлюємо користувача в БД
         try:
-            from database import get_random_meme
-            meme_obj = await get_random_meme()
-            if meme_obj:
-                meme_data = {"caption": meme_obj.text, "description": "Мем з бази"}
-                meme_views = getattr(meme_obj, 'views', 0)
-            else:
-                # Якщо БД порожня, використовуємо зразки БЕЗ ПОВТОРІВ
-                meme_index, meme_data = get_random_meme_without_repeat(user_id)
-                meme_views = random.randint(80, 600)  # Фейкові перегляди для демо
+            from database import get_or_create_user
+            await get_or_create_user(
+                user_id=user_id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name,
+                last_name=message.from_user.last_name
+            )
         except:
-            # Якщо БД не працює, використовуємо зразки БЕЗ ПОВТОРІВ
-            meme_index, meme_data = get_random_meme_without_repeat(user_id)
-            meme_views = random.randint(80, 600)  # Фейкові перегляди для демо
+            pass  # БД може бути недоступна
+        
+        # Отримуємо персоналізований контент
+        content_data = await get_personalized_content(user_id, "meme")
+        
+        if not content_data:
+            await message.answer(f"{EMOJI['cross']} Упс! Меми закінчилися. Спробуй пізніше!")
+            return
         
         # Контекстне привітання
         current_hour = datetime.now().hour
@@ -236,43 +347,96 @@ async def send_meme(message: Message, from_callback: bool = False):
         else:
             greeting = random.choice(TIME_GREETINGS["night"])
         
-        # Клавіатура для взаємодії
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        # Створюємо розширену клавіатуру
+        keyboard_buttons = [
             [
-                InlineKeyboardButton(text=f"{EMOJI['like']} Подобається", callback_data="like_meme"),
-                InlineKeyboardButton(text=f"{EMOJI['dislike']} Не подобається", callback_data="dislike_meme")
+                InlineKeyboardButton(text=f"{EMOJI['like']} Подобається", 
+                                   callback_data=f"like_meme_{content_data.get('content_id', 0)}"),
+                InlineKeyboardButton(text=f"{EMOJI['dislike']} Не подобається", 
+                                   callback_data=f"dislike_meme_{content_data.get('content_id', 0)}")
             ],
             [
                 InlineKeyboardButton(text=f"{EMOJI['laugh']} Ще мем", callback_data="get_meme"),
                 InlineKeyboardButton(text=f"{EMOJI['brain']} Анекдот", callback_data="get_joke")
-            ],
-            [
-                InlineKeyboardButton(text=f"{EMOJI['fire']} Надіслати свій", callback_data="submit_meme")
             ]
+        ]
+        
+        # Додаємо кнопки для персоналізованого контенту
+        if content_data.get('content_id'):
+            keyboard_buttons.append([
+                InlineKeyboardButton(text=f"{EMOJI['fire']} Поділитися", 
+                                   callback_data=f"share_meme_{content_data['content_id']}"),
+                InlineKeyboardButton(text=f"📊 Топ меми", callback_data="top_memes")
+            ])
+        
+        keyboard_buttons.append([
+            InlineKeyboardButton(text=f"{EMOJI['star']} Надіслати свій", callback_data="submit_meme")
         ])
         
-        # Додаємо лічильник переглядів
-        views_text = f"👁️ {meme_views}"
-        response_text = f"{greeting}\n\n{meme_data['caption']}\n\n{views_text} • {EMOJI['star']} Сподобався мем? Оціни!"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        # Формуємо інформацію про контент
+        content_info = []
+        
+        # Додаємо тематичні емодзі
+        if content_data.get('topic'):
+            topic_emoji = {
+                "programming": "💻", 
+                "work": "🏢", 
+                "life": "🌍", 
+                "family": "👨‍👩‍👧‍👦"
+            }.get(content_data['topic'], "📝")
+            content_info.append(f"{topic_emoji}")
+        
+        content_info.append(f"👁️ {content_data['views']}")
+        
+        if content_data['likes'] > 0:
+            content_info.append(f"❤️ {content_data['likes']}")
+        
+        # Персональні мітки
+        personal_tag = ""
+        if not content_data.get('is_new'):
+            personal_tag = f" {EMOJI['thinking']} (переглянуто)"
+        elif content_data.get('topic') in ['programming', 'work']:
+            personal_tag = f" {EMOJI['brain']} (рекомендовано)"
+        elif content_data.get('quality', 0) > 0.9:
+            personal_tag = f" {EMOJI['star']} (топ якість)"
+        
+        info_line = " • ".join(content_info) + personal_tag if content_info else personal_tag
+        
+        response_text = f"{greeting}\n\n{content_data['text']}\n\n{info_line}\n{EMOJI['star']} Сподобався мем? Оціни!"
         
         await message.answer(
             response_text,
             reply_markup=keyboard
         )
         
-        # Нарахування балів (якщо БД працює)
+        # Нарахування балів за перегляд
         try:
             from database import update_user_points
-            await update_user_points(user_id, 1, "перегляд мему")
+            if content_data.get('is_new'):
+                await update_user_points(user_id, 1, "перегляд нового мему")
         except:
             pass  # Ігноруємо помилки БД
         
         if not from_callback:
-            logger.info(f"🔥 Користувач {user_id} отримав мем без повтору")
+            logger.info(f"🔥 Користувач {user_id} отримав персоналізований мем")
             
     except Exception as e:
         logger.error(f"Помилка надсилання мему: {e}")
         await message.answer(f"{EMOJI['cross']} Упс! Сталася помилка. Спробуй ще раз!")
+
+# ===== СТАРІ ФУНКЦІЇ ДЛЯ СУМІСНОСТІ =====
+
+async def send_joke(message: Message, from_callback: bool = False):
+    """Стара функція для сумісності"""
+    await send_personalized_joke(message, from_callback)
+
+async def send_meme(message: Message, from_callback: bool = False):
+    """Стара функція для сумісності"""
+    await send_personalized_meme(message, from_callback)
+
+# ===== ПОДАЧА КОНТЕНТУ (БЕЗ ЗМІН) =====
 
 async def cmd_submit(message: Message, state: FSMContext):
     """Команда /submit - подача контенту на модерацію"""
@@ -403,39 +567,161 @@ async def handle_photo_submission(message: Message):
 
 async def callback_get_joke(callback_query: CallbackQuery):
     """Callback для отримання анекдоту"""
-    await send_joke(callback_query.message, from_callback=True)
+    await send_personalized_joke(callback_query.message, from_callback=True)
     await callback_query.answer()
 
 async def callback_get_meme(callback_query: CallbackQuery):
     """Callback для отримання мему"""
-    await send_meme(callback_query.message, from_callback=True)
+    await send_personalized_meme(callback_query.message, from_callback=True)
     await callback_query.answer()
 
 async def callback_like_content(callback_query: CallbackQuery):
-    """Обробка лайка контенту"""
+    """Обробка лайка контенту з персоналізацією"""
     user_id = callback_query.from_user.id
     
-    # Нарахування балів
-    try:
-        from database import update_user_points
-        await update_user_points(user_id, settings.POINTS_FOR_REACTION, "лайк контенту")
-    except:
-        pass  # Ігноруємо помилки БД
+    # Витягуємо ID контенту з callback_data
+    callback_data = callback_query.data
+    content_id = None
     
-    await callback_query.answer(f"{EMOJI['like']} Дякую за оцінку! +{settings.POINTS_FOR_REACTION} балів")
+    if "_" in callback_data:
+        parts = callback_data.split("_")
+        if len(parts) >= 3:
+            try:
+                content_id = int(parts[2])
+            except:
+                content_id = None
+    
+    # Записуємо лайк в БД з нарахуванням балів автору
+    try:
+        from database import add_content_rating
+        if content_id:
+            success = await add_content_rating(user_id, content_id, "like", settings.POINTS_FOR_REACTION)
+            if success:
+                # Аналізуємо поведінку для персоналізації
+                try:
+                    from database import analyze_user_behavior
+                    await analyze_user_behavior(user_id)
+                except:
+                    pass
+                
+                await callback_query.answer(f"{EMOJI['like']} Дякую за оцінку! +{settings.POINTS_FOR_REACTION} балів")
+            else:
+                await callback_query.answer(f"{EMOJI['like']} Ви вже оцінювали цей контент!")
+        else:
+            # Fallback для контенту без ID
+            from database import update_user_points
+            await update_user_points(user_id, settings.POINTS_FOR_REACTION, "лайк контенту")
+            await callback_query.answer(f"{EMOJI['like']} Дякую за оцінку! +{settings.POINTS_FOR_REACTION} балів")
+    except Exception as e:
+        logger.error(f"Помилка обробки лайка: {e}")
+        await callback_query.answer(f"{EMOJI['like']} Дякую за оцінку!")
 
 async def callback_dislike_content(callback_query: CallbackQuery):
     """Обробка дизлайка контенту"""
     user_id = callback_query.from_user.id
     
-    # Нарахування балів
-    try:
-        from database import update_user_points
-        await update_user_points(user_id, 1, "дизлайк контенту")
-    except:
-        pass  # Ігноруємо помилки БД
+    # Витягуємо ID контенту з callback_data
+    callback_data = callback_query.data
+    content_id = None
     
-    await callback_query.answer(f"{EMOJI['dislike']} Дякую за відгук! +1 бал")
+    if "_" in callback_data:
+        parts = callback_data.split("_")
+        if len(parts) >= 3:
+            try:
+                content_id = int(parts[2])
+            except:
+                content_id = None
+    
+    # Записуємо дизлайк в БД
+    try:
+        from database import add_content_rating
+        if content_id:
+            success = await add_content_rating(user_id, content_id, "dislike", 1)
+            if success:
+                await callback_query.answer(f"{EMOJI['dislike']} Дякую за відгук! +1 бал")
+            else:
+                await callback_query.answer(f"{EMOJI['dislike']} Ви вже оцінювали цей контент!")
+        else:
+            # Fallback
+            from database import update_user_points
+            await update_user_points(user_id, 1, "дизлайк контенту")
+            await callback_query.answer(f"{EMOJI['dislike']} Дякую за відгук! +1 бал")
+    except Exception as e:
+        logger.error(f"Помилка обробки дизлайка: {e}")
+        await callback_query.answer(f"{EMOJI['dislike']} Дякую за відгук!")
+
+async def callback_share_content(callback_query: CallbackQuery):
+    """НОВА ФУНКЦІЯ - Поділитися контентом"""
+    user_id = callback_query.from_user.id
+    
+    # Витягуємо ID контенту
+    callback_data = callback_query.data
+    if "_" in callback_data:
+        parts = callback_data.split("_")
+        if len(parts) >= 3:
+            try:
+                content_id = int(parts[2])
+                
+                # Записуємо поділитися в БД
+                from database import add_content_rating, update_user_points
+                await add_content_rating(user_id, content_id, "share", 3)
+                await update_user_points(user_id, 3, "поділитися контентом")
+                
+                await callback_query.answer(f"{EMOJI['fire']} Дякую за поширення! +3 бали")
+                
+                # Надсилаємо інструкції для поділитися
+                await callback_query.message.answer(
+                    f"{EMOJI['fire']} <b>Поділитися контентом:</b>\n\n"
+                    f"Просто перешли це повідомлення друзям!\n"
+                    f"Або використай кнопку 'Переслати' 📤"
+                )
+                
+            except Exception as e:
+                logger.error(f"Помилка поділитися: {e}")
+                await callback_query.answer("Помилка поділитися")
+
+async def callback_top_content(callback_query: CallbackQuery):
+    """НОВА ФУНКЦІЯ - Показати топ контент"""
+    try:
+        content_type = "joke" if "jokes" in callback_query.data else "meme"
+        emoji = EMOJI['brain'] if content_type == "joke" else EMOJI['laugh']
+        name = "АНЕКДОТИ" if content_type == "joke" else "МЕМИ"
+        
+        # Спробуємо отримати топ з БД
+        try:
+            from database import get_trending_content, get_popular_content
+            
+            trending = await get_trending_content(content_type, 3)
+            popular = await get_popular_content(content_type, 3)
+            
+            response = f"{emoji} <b>ТОП {name}</b>\n\n"
+            
+            if trending:
+                response += f"🔥 <b>Трендові зараз:</b>\n"
+                for i, item in enumerate(trending, 1):
+                    response += f"{i}. 👁️{item.views} ❤️{item.likes} - {item.text[:50]}...\n"
+                response += "\n"
+            
+            if popular:
+                response += f"⭐ <b>Популярні за весь час:</b>\n"
+                for i, item in enumerate(popular, 1):
+                    response += f"{i}. 👁️{item.views} ❤️{item.likes} - {item.text[:50]}...\n"
+            
+        except:
+            # Fallback якщо БД недоступна
+            response = f"{emoji} <b>ТОП {name}</b>\n\n🔄 Статистика оновлюється..."
+        
+        await callback_query.message.edit_text(
+            response,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🔙 Назад", 
+                                   callback_data="get_joke" if content_type == "joke" else "get_meme")
+            ]])
+        )
+        
+    except Exception as e:
+        logger.error(f"Помилка топ контенту: {e}")
+        await callback_query.answer("Помилка завантаження топу")
 
 async def callback_submit_instructions(callback_query: CallbackQuery):
     """Інструкції по поданні контенту"""
@@ -475,10 +761,20 @@ def register_content_handlers(dp: Dispatcher):
     # Обробка фото
     dp.message.register(handle_photo_submission, F.photo)
     
-    # Callback запити
+    # Основні callback запити
     dp.callback_query.register(callback_get_joke, F.data == "get_joke")
     dp.callback_query.register(callback_get_meme, F.data == "get_meme")
+    
+    # Оцінки контенту (старі + нові з ID)
     dp.callback_query.register(callback_like_content, F.data.in_(["like_joke", "like_meme"]))
+    dp.callback_query.register(callback_like_content, F.data.startswith("like_"))
     dp.callback_query.register(callback_dislike_content, F.data.in_(["dislike_joke", "dislike_meme"]))
+    dp.callback_query.register(callback_dislike_content, F.data.startswith("dislike_"))
+    
+    # Нові функції
+    dp.callback_query.register(callback_share_content, F.data.startswith("share_"))
+    dp.callback_query.register(callback_top_content, F.data.in_(["top_jokes", "top_memes"]))
+    
+    # Інструкції
     dp.callback_query.register(callback_submit_instructions, F.data.in_(["how_submit_joke", "how_submit_meme"]))
     dp.callback_query.register(callback_submit_instructions, F.data.in_(["submit_joke", "submit_meme"]))
