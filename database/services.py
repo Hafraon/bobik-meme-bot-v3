@@ -346,3 +346,33 @@ class DatabaseService:
                 }
                 for row in duels
             ]
+    
+    # ===== ДОДАТКОВА ФУНКЦІЯ ДЛЯ ADMIN HANDLERS =====
+    
+    @staticmethod
+    def moderate_content(content_id: int, approve: bool, moderator_id: int, comment: str = None) -> bool:
+        """Модерація контенту (додана для admin handlers)"""
+        try:
+            with get_db_session() as session:
+                content = session.query(Content).filter(Content.id == content_id).first()
+                if not content:
+                    return False
+                
+                # Встановлюємо новий статус
+                content.status = ContentStatus.APPROVED if approve else ContentStatus.REJECTED
+                content.moderator_id = moderator_id
+                content.moderated_at = datetime.utcnow()
+                if comment:
+                    content.moderation_comment = comment
+                
+                # Нараховуємо бали автору за схвалення
+                if approve:
+                    author = session.query(User).filter(User.id == content.author_id).first()
+                    if author:
+                        author.points += 20  # Бонус за схвалений контент
+                
+                session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Помилка модерації контенту {content_id}: {e}")
+            return False
