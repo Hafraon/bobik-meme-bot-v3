@@ -1,135 +1,150 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 База даних пакет для україномовного бота (ВИПРАВЛЕНО) 🧠😂🔥
+🧠😂🔥 ПРОФЕСІЙНІ ЕКСПОРТИ МОДУЛЯ DATABASE 🧠😂🔥
+Повний набір функцій для україномовного Telegram-бота
 """
 
-# ===== ОСНОВНІ ІМПОРТИ =====
+# ===== ОСНОВНІ ІМПОРТИ З database.py =====
 from .database import (
-    # Ініціалізація
+    # Ініціалізація та сесії
     init_db,
     get_db_session,
+    verify_database_integrity,
     
-    # Користувачі
+    # Користувачі - повний CRUD
     get_or_create_user,
-    update_user_points,
-    update_user_stats,
-    get_user_stats,
     get_user_by_id,
+    update_user_points,
+    get_user_stats,
+    calculate_user_rank,
+    get_rank_info,
     
-    # Контент
+    # Контент - повний CRUD
     add_content_for_moderation,
-    submit_content,
     get_pending_content,
     moderate_content,
-    get_random_approved_content,
     get_content_by_id,
+    get_random_approved_content,
     
-    # Рейтинги
+    # Рейтинги та взаємодія
     add_content_rating,
     get_content_rating,
     update_content_rating,
     
-    # Статистика
+    # Рекомендації та персоналізація
+    get_recommended_content,
+    record_content_view,
+    
+    # Статистика бота
     get_bot_statistics,
     update_bot_statistics,
     
-    # Дуелі (якщо є)
+    # Дуелі
     create_duel,
     get_active_duels,
     vote_in_duel,
     
-    # Допоміжні
+    # Допоміжні функції
     ensure_admin_exists,
-    add_initial_data
+    add_initial_data,
+    add_sample_content,
+    
+    # Legacy підтримка
+    submit_content,
+    update_user_stats
 )
 
+# ===== ІМПОРТИ МОДЕЛЕЙ =====
 from .models import (
+    # Базова модель
     Base,
+    
+    # Основні моделі
     User,
-    Content, 
+    Content,
     Rating,
     Duel,
     DuelVote,
     AdminAction,
     BotStatistics,
+    
+    # Енуми
     ContentType,
     ContentStatus,
     UserRank
 )
 
-# ===== ФУНКЦІЇ ЩО ВІДСУТНІ - ДОДАЄМО ЗАГЛУШКИ =====
-
-async def get_recommended_content(user_id: int, content_type: str):
-    """Заглушка для рекомендованого контенту"""
-    return await get_random_approved_content(content_type)
-
-async def record_content_view(user_id: int, content_id: int, source: str = "command"):
-    """Заглушка для запису перегляду"""
-    # Оновлюємо статистику користувача
-    return await update_user_stats(user_id, {"views_count": 1})
-
-async def get_user_content_history(user_id: int, limit: int = 10):
-    """Заглушка для історії контенту користувача"""
-    return []
-
-async def get_trending_content(days: int = 7, limit: int = 10):
-    """Заглушка для трендового контенту"""
-    return await get_random_approved_content("mixed", limit)
-
-# ===== ЕКСПОРТ ВСІХ ФУНКЦІЙ =====
+# ===== ЕКСПОРТ ВСІХ ФУНКЦІЙ ТА КЛАСІВ =====
 __all__ = [
-    # Основні
+    # === ІНІЦІАЛІЗАЦІЯ ===
     'init_db',
-    'get_db_session',
+    'get_db_session', 
+    'verify_database_integrity',
     
-    # Користувачі  
+    # === КОРИСТУВАЧІ ===
     'get_or_create_user',
-    'update_user_points',
-    'update_user_stats', 
-    'get_user_stats',
     'get_user_by_id',
+    'update_user_points',
+    'get_user_stats',
+    'calculate_user_rank',
+    'get_rank_info',
+    'update_user_stats',  # Legacy
     
-    # Контент
+    # === КОНТЕНТ ===
     'add_content_for_moderation',
-    'submit_content',
     'get_pending_content',
     'moderate_content',
-    'get_random_approved_content',
     'get_content_by_id',
-    'get_recommended_content',
-    'record_content_view',
-    'get_user_content_history',
-    'get_trending_content',
+    'get_random_approved_content',
+    'submit_content',  # Legacy
     
-    # Рейтинги
+    # === РЕЙТИНГИ ===
     'add_content_rating',
-    'get_content_rating', 
+    'get_content_rating',
     'update_content_rating',
     
-    # Статистика
+    # === РЕКОМЕНДАЦІЇ ===
+    'get_recommended_content',
+    'record_content_view',
+    
+    # === СТАТИСТИКА ===
     'get_bot_statistics',
     'update_bot_statistics',
     
-    # Дуелі
+    # === ДУЕЛІ ===
     'create_duel',
     'get_active_duels',
     'vote_in_duel',
     
-    # Моделі
+    # === ДОПОМІЖНІ ===
+    'ensure_admin_exists',
+    'add_initial_data',
+    'add_sample_content',
+    
+    # === МОДЕЛІ ===
     'Base',
     'User',
     'Content',
-    'Rating', 
+    'Rating',
     'Duel',
     'DuelVote',
     'AdminAction',
     'BotStatistics',
+    
+    # === ЕНУМИ ===
     'ContentType',
     'ContentStatus',
-    'UserRank',
-    
-    # Допоміжні
-    'ensure_admin_exists',
-    'add_initial_data'
+    'UserRank'
 ]
+
+# ===== ВЕРСІЯ МОДУЛЯ =====
+__version__ = "2.0.0"
+__author__ = "Ukraine Telegram Bot Team"
+__description__ = "Професійний модуль роботи з базою даних для україномовного Telegram-бота"
+
+# ===== НАЛАШТУВАННЯ ЛОГУВАННЯ =====
+import logging
+logger = logging.getLogger(__name__)
+logger.info(f"📦 Database модуль завантажено успішно (версія {__version__})")
+logger.info(f"📋 Доступно {len(__all__)} функцій та класів")
