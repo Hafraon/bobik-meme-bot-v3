@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Розширені моделі бази даних (ВИПРАВЛЕНІ RELATIONSHIPS) 🧠😂🔥
+🧠😂🔥 Розширені моделі бази даних (ВИПРАВЛЕНІ ENUM ДЛЯ POSTGRESQL) 🧠😂🔥
 """
 
 from datetime import datetime, timedelta
@@ -18,28 +18,28 @@ from sqlalchemy.orm import relationship
 Base = declarative_base()
 
 class ContentType(Enum):
-    """Тип контенту"""
-    MEME = "meme"
-    JOKE = "joke"
+    """Тип контенту - 🔥 ВИПРАВЛЕНО для PostgreSQL!"""
+    MEME = "MEME"    # ✅ Верхній регістр
+    JOKE = "JOKE"    # ✅ Верхній регістр
 
 class ContentStatus(Enum):
-    """Статус контенту"""
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
+    """Статус контенту - 🔥 ВИПРАВЛЕНО для PostgreSQL!"""
+    PENDING = "PENDING"      # ✅ Верхній регістр для PostgreSQL
+    APPROVED = "APPROVED"    # ✅ Верхній регістр для PostgreSQL
+    REJECTED = "REJECTED"    # ✅ Верхній регістр для PostgreSQL
 
 class DuelStatus(Enum):
-    """Статус дуелі"""
-    ACTIVE = "active"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
+    """Статус дуелі - 🔥 ВИПРАВЛЕНО для PostgreSQL!"""
+    ACTIVE = "ACTIVE"        # ✅ Верхній регістр
+    COMPLETED = "COMPLETED"  # ✅ Верхній регістр
+    CANCELLED = "CANCELLED"  # ✅ Верхній регістр
 
 # НОВІ ENUM'И ДЛЯ ПЕРСОНАЛІЗАЦІЇ
 class PreferenceType(Enum):
     """Типи вподобань"""
-    TOPIC = "topic"
-    STYLE = "style"
-    LENGTH = "length"
+    TOPIC = "TOPIC"      # ✅ Верхній регістр
+    STYLE = "STYLE"      # ✅ Верхній регістр
+    LENGTH = "LENGTH"    # ✅ Верхній регістр
 
 class User(Base):
     """Модель користувача - РОЗШИРЕНА"""
