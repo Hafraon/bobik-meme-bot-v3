@@ -1,494 +1,425 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Ініціалізація та робота з базою даних (ВИПРАВЛЕНО створення адміна) 🧠😂🔥
+🧠😂🔥 Додавання відсутніх функцій до database.py 🧠😂🔥
+ДОДАТИ ЦІ ФУНКЦІЇ ДО ІСНУЮЧОГО database/database.py
 """
 
 import logging
 from contextlib import contextmanager
-from typing import List, Optional
-from datetime import datetime
-
-from sqlalchemy import create_engine, func
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
+from sqlalchemy import create_engine, func, and_, or_, desc
 from sqlalchemy.orm import sessionmaker, Session
-
-from config.settings import settings
-from database.models import (
-    Base, User, Content, Rating, Duel, DuelVote, 
-    AdminAction, BotStatistics, ContentType, ContentStatus
-)
 
 logger = logging.getLogger(__name__)
 
-# Створення движка бази даних
-engine = create_engine(
-    settings.DATABASE_URL,
-    echo=False,  # Встановіть True для debug SQL запитів
-    pool_pre_ping=True,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {}
-)
+# ===== ФУНКЦІЇ ДЛЯ РОБОТИ З РЕЙТИНГАМИ =====
 
-# Створення фабрики сесій
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-async def init_db():
-    """Ініціалізація бази даних"""
+async def add_content_rating(user_id: int, content_id: int, rating: int, comment: str = None) -> bool:
+    """Додати рейтинг до контенту"""
     try:
-        # Створення всіх таблиць
-        Base.metadata.create_all(bind=engine)
-        logger.info("🔥 Таблиці бази даних створено!")
-        
-        # Додавання початкових даних
-        await add_initial_data()
-        
+        with get_db_session() as session:
+            # Перевірити чи користувач вже оцінював цей контент
+            existing_rating = session.query(Rating).filter(
+                and_(Rating.user_id == user_id, Rating.content_id == content_id)
+            ).first()
+            
+            if existing_rating:
+                # Оновити існуючий рейтинг
+                old_rating = existing_rating.rating
+                existing_rating.rating = rating
+                existing_rating.comment = comment
+                session.commit()
+                
+                # Оновити статистику контенту
+                content = session.query(Content).filter(Content.id == content_id).first()
+                if content:
+                    if old_rating == 1 and rating == -1:
+                        content.likes = max(0, content.likes - 1)
+                        content.dislikes += 1
+                    elif old_rating == -1 and rating == 1:
+                        content.dislikes = max(0, content.dislikes - 1)
+                        content.likes += 1
+                    session.commit()
+                
+                logger.info(f"🔄 Оновлено рейтинг від {user_id} для контенту {content_id}: {rating}")
+                return True
+            else:
+                # Створити новий рейтинг
+                new_rating = Rating(
+                    user_id=user_id,
+                    content_id=content_id,
+                    rating=rating,
+                    comment=comment
+                )
+                session.add(new_rating)
+                session.commit()
+                
+                # Оновити статистику контенту
+                content = session.query(Content).filter(Content.id == content_id).first()
+                if content:
+                    if rating == 1:
+                        content.likes += 1
+                    elif rating == -1:
+                        content.dislikes += 1
+                    session.commit()
+                
+                # Оновити статистику користувача
+                user = session.query(User).filter(User.telegram_id == user_id).first()
+                if user:
+                    if rating == 1:
+                        user.likes_given += 1
+                    else:
+                        user.dislikes_given += 1
+                    session.commit()
+                
+                logger.info(f"➕ Додано рейтинг від {user_id} для контенту {content_id}: {rating}")
+                return True
+                
     except Exception as e:
-        logger.error(f"😂 Помилка ініціалізації БД: {e}")
-        raise
+        logger.error(f"❌ Помилка додавання рейтингу: {e}")
+        return False
 
-@contextmanager
-def get_db_session():
-    """Контекстний менеджер для роботи з БД"""
-    session = SessionLocal()
+async def get_content_rating(user_id: int, content_id: int) -> Optional[int]:
+    """Отримати рейтинг користувача для контенту"""
     try:
-        yield session
-        session.commit()
-    except Exception as e:
-        session.rollback()
-        logger.error(f"🧠 Помилка БД: {e}")
-        raise
-    finally:
-        session.close()
-
-async def add_initial_data():
-    """Додавання початкових даних з обов'язковим створенням адміністратора"""
-    with get_db_session() as session:
-        # ✅ КРОК 1: Створюємо адміністратора якщо його немає
-        await ensure_admin_user_exists(session)
-        
-        # КРОК 2: Перевірка чи є вже дані
-        existing_jokes = session.query(Content).filter_by(
-            content_type=ContentType.JOKE,
-            status=ContentStatus.APPROVED
-        ).count()
-        
-        if existing_jokes == 0:
-            await add_sample_jokes(session)
+        with get_db_session() as session:
+            rating = session.query(Rating).filter(
+                and_(Rating.user_id == user_id, Rating.content_id == content_id)
+            ).first()
             
-        existing_memes = session.query(Content).filter_by(
-            content_type=ContentType.MEME,
-            status=ContentStatus.APPROVED
-        ).count()
-        
-        if existing_memes == 0:
-            await add_sample_memes(session)
-
-async def ensure_admin_user_exists(session: Session):
-    """Створити користувача-адміністратора якщо його немає"""
-    try:
-        # Перевіряємо чи існує адміністратор
-        admin_user = session.query(User).filter(User.id == settings.ADMIN_ID).first()
-        
-        if not admin_user:
-            # Створюємо адміністратора з максимальними привілеями
-            admin_user = User(
-                id=settings.ADMIN_ID,
-                username="admin",
-                first_name="Головний Адміністратор",
-                last_name="Бота",
-                points=9999,
-                rank="🚀 Гумористичний Геній",
-                jokes_submitted=100,
-                jokes_approved=100,
-                memes_submitted=50,
-                memes_approved=50,
-                duels_won=25,
-                daily_subscription=True,
-                language_code="uk",
-                preferred_content_type="mixed",
-                reset_history_days=30,  # Адмін має довшу історію
-                created_at=datetime.utcnow(),
-                last_active=datetime.utcnow()
-            )
-            
-            session.add(admin_user)
-            session.commit()
-            
-            logger.info(f"👑 Створено користувача-адміністратора: ID {settings.ADMIN_ID}")
-        else:
-            # Оновлюємо інформацію адміністратора якщо потрібно
-            admin_user.last_active = datetime.utcnow()
-            if admin_user.rank != "🚀 Гумористичний Геній":
-                admin_user.rank = "🚀 Гумористичний Геній"
-                admin_user.points = max(admin_user.points, 9999)
-            
-            session.commit()
-            logger.info(f"✅ Адміністратор уже існує: ID {settings.ADMIN_ID}")
+            return rating.rating if rating else None
             
     except Exception as e:
-        logger.error(f"❌ Помилка створення адміністратора: {e}")
-        raise
+        logger.error(f"❌ Помилка отримання рейтингу: {e}")
+        return None
 
-async def add_sample_jokes(session: Session):
-    """Додавання зразкових анекдотів"""
-    sample_jokes = [
-        "🧠 Приходить програміст до лікаря:\n- Доктор, в мене болить рука!\n- А де саме?\n- В лівому кліку! 😂",
-        
-        "🔥 Зустрічаються два українці:\n- Як справи?\n- Та нормально, працюю в IT.\n- А що робиш?\n- Борщ доставляю через додаток! 😂",
-        
-        "😂 Учитель запитує:\n- Петрику, скільки буде 2+2?\n- А ви про що? Про гривні чи про долари? 🧠",
-        
-        "🔥 Покупець у магазині:\n- Скільки коштує хліб?\n- 20 гривень.\n- А вчора був 15!\n- Вчора ви його і не купили! 😂",
-        
-        "🧠 Дружина чоловікові:\n- Любий, я схудла на 5 кг!\n- А де вони?\n- В холодильнику! 😂🔥",
-        
-        "😂 Син питає батька:\n- Тату, а що таке політика?\n- Це коли багато людей говорять, а нічого не роблять.\n- А що таке демократія?\n- Це коли всі мають право говорити, але слухає тільки мама! 🧠",
-        
-        "🔥 Лікар пацієнтові:\n- Ви курите?\n- Ні.\n- П'єте?\n- Ні.\n- Тоді живіть як хочете - все одно довго протягнете! 😂",
-        
-        "🧠 Заходить чоловік до аптеки:\n- Дайте щось від голови!\n- А що саме болить?\n- Дружина! 😂🔥",
-        
-        "😂 Розмова в офісі:\n- Ти чому такий веселий?\n- Зарплату підняли!\n- На скільки?\n- На другий поверх! 🧠",
-        
-        "🔥 Студент здає екзамен:\n- Розкажіть про Наполеона.\n- Не можу, ми не знайомі особисто.\n- Тоді про Пушкіна.\n- Теж не знайомі.\n- Незадовільно!\n- А з ким ви знайомі?\n- З вами... і то погано! 😂"
-    ]
-    
-    for joke_text in sample_jokes:
-        joke = Content(
-            content_type=ContentType.JOKE,
-            text=joke_text,
-            status=ContentStatus.APPROVED,
-            author_id=settings.ADMIN_ID,  # ✅ Тепер адміністратор точно існує!
-            views=0,
-            likes=0,
-            topic="life",  # Додаємо базову тематику
-            style="irony",  # Додаємо стиль
-            difficulty=1,
-            quality_score=0.9,  # Високий рейтинг для адміністраторського контенту
-            popularity_score=0.5
-        )
-        session.add(joke)
-    
-    logger.info(f"🔥 Додано {len(sample_jokes)} початкових анекдотів")
+async def update_content_rating(user_id: int, content_id: int, new_rating: int) -> bool:
+    """Оновити рейтинг (алиас для add_content_rating)"""
+    return await add_content_rating(user_id, content_id, new_rating)
 
-async def add_sample_memes(session: Session):
-    """Додавання зразкових мемів (посилання)"""
-    sample_memes = [
-        {
-            "caption": "🧠 Коли нарешті зрозумів як працює async/await 😂",
-            "url": "https://i.imgur.com/placeholder1.jpg",
-            "topic": "programming",
-            "style": "irony"
-        },
-        {
-            "caption": "🔥 Настрій понеділка vs настрій п'ятниці 😂",
-            "url": "https://i.imgur.com/placeholder2.jpg",
-            "topic": "work",
-            "style": "sarcasm"
-        },
-        {
-            "caption": "🧠 Коли код працює з першого разу 😂🔥",
-            "url": "https://i.imgur.com/placeholder3.jpg",
-            "topic": "programming",
-            "style": "absurd"
-        }
-    ]
-    
-    for meme_data in sample_memes:
-        meme = Content(
-            content_type=ContentType.MEME,
-            text=meme_data["caption"],
-            file_url=meme_data["url"],
-            status=ContentStatus.APPROVED,
-            author_id=settings.ADMIN_ID,  # ✅ Тепер адміністратор точно існує!
-            views=0,
-            likes=0,
-            topic=meme_data["topic"],
-            style=meme_data["style"],
-            difficulty=1,
-            quality_score=0.9,
-            popularity_score=0.5
-        )
-        session.add(meme)
-    
-    logger.info(f"🔥 Додано {len(sample_memes)} початкових мемів")
+# ===== ФУНКЦІЇ ДЛЯ РОБОТИ З КОРИСТУВАЧАМИ =====
 
-# ===== ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ РОБОТИ З КОРИСТУВАЧАМИ =====
+async def get_user_by_id(user_id: int) -> Optional[User]:
+    """Отримати користувача за telegram_id"""
+    try:
+        with get_db_session() as session:
+            user = session.query(User).filter(User.telegram_id == user_id).first()
+            if user:
+                # Оновити час останньої активності
+                user.last_activity = func.now()
+                session.commit()
+            return user
+    except Exception as e:
+        logger.error(f"❌ Помилка отримання користувача {user_id}: {e}")
+        return None
 
-async def get_or_create_user(user_id: int, username: str = None, first_name: str = None, last_name: str = None) -> User:
-    """Отримання або створення користувача"""
-    with get_db_session() as session:
-        user = session.query(User).filter(User.id == user_id).first()
-        
-        if not user:
-            user = User(
-                id=user_id,
-                username=username,
-                first_name=first_name,
-                last_name=last_name,
-                preferred_content_type="mixed",
-                reset_history_days=7,
-                last_history_reset=datetime.utcnow()
-            )
-            session.add(user)
-            session.commit()
-            logger.info(f"🧠 Створено нового користувача: {user_id}")
-        else:
-            # Оновлення інформації користувача
-            user.username = username
-            user.first_name = first_name
-            user.last_name = last_name
-            user.last_active = datetime.utcnow()
-            session.commit()
-        
-        return user
-
-async def update_user_points(user_id: int, points: int, reason: str = ""):
-    """Оновлення балів користувача"""
-    with get_db_session() as session:
-        user = session.query(User).filter(User.id == user_id).first()
-        if user:
-            user.points += points
+async def update_user_stats(user_id: int, stats_update: Dict[str, Any]) -> bool:
+    """Оновити статистику користувача"""
+    try:
+        with get_db_session() as session:
+            user = session.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return False
             
-            # Оновлення рангу
-            new_rank = get_rank_by_points(user.points)
-            if new_rank != user.rank:
-                user.rank = new_rank
-                logger.info(f"🔥 Користувач {user_id} отримав новий ранг: {new_rank}")
+            # Оновити статистику
+            for field, increment in stats_update.items():
+                if hasattr(user, field):
+                    current_value = getattr(user, field) or 0
+                    setattr(user, field, current_value + increment)
             
+            user.last_activity = func.now()
             session.commit()
-            logger.info(f"😂 Користувач {user_id} отримав {points} балів за: {reason}")
+            logger.info(f"📊 Оновлено статистику користувача {user_id}: {stats_update}")
+            return True
+            
+    except Exception as e:
+        logger.error(f"❌ Помилка оновлення статистики {user_id}: {e}")
+        return False
 
-def get_rank_by_points(points: int) -> str:
-    """Визначення рангу по балах"""
-    for min_points in sorted(settings.RANKS.keys(), reverse=True):
-        if points >= min_points:
-            return settings.RANKS[min_points]
-    return settings.RANKS[0]
+async def get_user_stats(user_id: int) -> Dict[str, Any]:
+    """Отримати детальну статистику користувача"""
+    try:
+        with get_db_session() as session:
+            user = session.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return {}
+            
+            # Базова статистика користувача
+            stats = {
+                "user_id": user.telegram_id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "total_points": user.total_points,
+                "current_rank": user.current_rank.value if user.current_rank else "Новачок",
+                "is_premium": user.is_premium,
+                "daily_subscription": user.daily_subscription,
+                
+                # Контент
+                "jokes_submitted": user.jokes_submitted,
+                "jokes_approved": user.jokes_approved,
+                "memes_submitted": user.memes_submitted,
+                "memes_approved": user.memes_approved,
+                
+                # Взаємодія
+                "likes_given": user.likes_given,
+                "dislikes_given": user.dislikes_given,
+                "comments_made": user.comments_made,
+                
+                # Дуелі
+                "duels_won": user.duels_won,
+                "duels_lost": user.duels_lost,
+                "duels_participated": user.duels_participated,
+                
+                # Час
+                "created_at": user.created_at,
+                "last_activity": user.last_activity
+            }
+            
+            # Додаткова статистика з інших таблиць
+            total_content_created = session.query(Content).filter(
+                Content.author_id == user_id
+            ).count()
+            
+            approved_content = session.query(Content).filter(
+                and_(Content.author_id == user_id, Content.status == ContentStatus.APPROVED)
+            ).count()
+            
+            total_ratings_given = session.query(Rating).filter(Rating.user_id == user_id).count()
+            
+            stats.update({
+                "total_content_created": total_content_created,
+                "approved_content": approved_content,
+                "total_ratings_given": total_ratings_given,
+                "approval_rate": (approved_content / total_content_created * 100) if total_content_created > 0 else 0
+            })
+            
+            return stats
+            
+    except Exception as e:
+        logger.error(f"❌ Помилка отримання статистики {user_id}: {e}")
+        return {}
 
 # ===== ФУНКЦІЇ ДЛЯ РОБОТИ З КОНТЕНТОМ =====
 
-async def get_random_joke() -> Optional[Content]:
-    """Отримання випадкового анекдоту"""
-    with get_db_session() as session:
-        joke = session.query(Content).filter(
-            Content.content_type == ContentType.JOKE,
-            Content.status == ContentStatus.APPROVED
-        ).order_by(func.random()).first()
-        
-        if joke:
-            joke.views += 1
-            session.commit()
-        
-        return joke
+async def get_content_by_id(content_id: int) -> Optional[Content]:
+    """Отримати контент за ID"""
+    try:
+        with get_db_session() as session:
+            return session.query(Content).filter(Content.id == content_id).first()
+    except Exception as e:
+        logger.error(f"❌ Помилка отримання контенту {content_id}: {e}")
+        return None
 
-async def get_random_meme() -> Optional[Content]:
-    """Отримання випадкового мему"""
-    with get_db_session() as session:
-        meme = session.query(Content).filter(
-            Content.content_type == ContentType.MEME,
-            Content.status == ContentStatus.APPROVED
-        ).order_by(func.random()).first()
-        
-        if meme:
-            meme.views += 1
-            session.commit()
-        
-        return meme
-
-# ===== НОВА ФУНКЦІЯ! =====
-async def add_content_for_moderation(user_id: int, content_type: str, text: str, file_id: str = None) -> Content:
-    """Додати контент на модерацію"""
-    with get_db_session() as session:
-        # Конвертуємо string в enum
-        if content_type == "joke":
-            ct = ContentType.JOKE
-        elif content_type == "meme":
-            ct = ContentType.MEME
-        else:
-            raise ValueError(f"Невідомий тип контенту: {content_type}")
-        
-        content = Content(
-            content_type=ct,
-            text=text,
-            file_id=file_id,
-            author_id=user_id,
-            status=ContentStatus.PENDING,
-            topic="life",  # Базова тематика для нового контенту
-            style="irony",
-            difficulty=1,
-            quality_score=0.5,
-            popularity_score=0.0
-        )
-        session.add(content)
-        session.commit()
-        
-        # Оновлення статистики користувача
-        user = session.query(User).filter(User.id == user_id).first()
-        if user:
-            if ct == ContentType.JOKE:
-                user.jokes_submitted += 1
-            else:
-                user.memes_submitted += 1
-            session.commit()
-        
-        logger.info(f"🧠 Новий контент на модерацію від {user_id}: {content.id}")
-        return content
-
-async def submit_content(user_id: int, content_type: ContentType, text: str = None, file_id: str = None) -> Content:
-    """Подача контенту на модерацію (стара функція для сумісності)"""
-    ct_string = "joke" if content_type == ContentType.JOKE else "meme"
-    return await add_content_for_moderation(user_id, ct_string, text, file_id)
-
-async def get_pending_content() -> List[Content]:
-    """Отримання контенту на модерацію"""
-    with get_db_session() as session:
-        return session.query(Content).filter(
-            Content.status == ContentStatus.PENDING
-        ).order_by(Content.created_at).all()
-
-async def moderate_content(content_id: int, moderator_id: int, approve: bool, comment: str = None):
-    """Модерація контенту"""
-    with get_db_session() as session:
-        content = session.query(Content).filter(Content.id == content_id).first()
-        if content:
-            content.status = ContentStatus.APPROVED if approve else ContentStatus.REJECTED
-            content.moderator_id = moderator_id
-            content.moderation_comment = comment
-            content.moderated_at = func.now()
+async def get_random_approved_content(content_type: str = "mixed", limit: int = 1) -> List[Content]:
+    """Отримати випадковий схвалений контент"""
+    try:
+        with get_db_session() as session:
+            query = session.query(Content).filter(Content.status == ContentStatus.APPROVED)
             
-            # Оновлення статистики автора
-            author = session.query(User).filter(User.id == content.author_id).first()
-            if author and approve:
-                if content.content_type == ContentType.JOKE:
-                    author.jokes_approved += 1
-                else:
-                    author.memes_approved += 1
-                
-                # НОВЕ! Нарахування балів за схвалення
-                author.points += settings.POINTS_FOR_APPROVAL
-                new_rank = get_rank_by_points(author.points)
-                if new_rank != author.rank:
-                    author.rank = new_rank
+            if content_type != "mixed":
+                if content_type == "joke":
+                    query = query.filter(Content.content_type == ContentType.JOKE)
+                elif content_type == "meme":
+                    query = query.filter(Content.content_type == ContentType.MEME)
+            
+            # Сортувати випадково та обмежити
+            content_list = query.order_by(func.random()).limit(limit).all()
+            return content_list if limit > 1 else content_list[0] if content_list else None
+            
+    except Exception as e:
+        logger.error(f"❌ Помилка отримання випадкового контенту: {e}")
+        return [] if limit > 1 else None
+
+# ===== ФУНКЦІЇ ДЛЯ ДУЕЛЕЙ =====
+
+async def create_duel(challenger_id: int, challenger_content_id: int) -> Optional[Duel]:
+    """Створити новий дуель"""
+    try:
+        with get_db_session() as session:
+            # Знайти опонента (випадкового активного користувача)
+            potential_opponents = session.query(User).filter(
+                and_(
+                    User.telegram_id != challenger_id,
+                    User.is_active == True,
+                    User.total_points > 10  # Мінімальна активність
+                )
+            ).limit(20).all()
+            
+            if not potential_opponents:
+                return None
+            
+            # Випадковий опонент
+            import random
+            opponent = random.choice(potential_opponents)
+            
+            duel = Duel(
+                challenger_id=challenger_id,
+                opponent_id=opponent.telegram_id,
+                challenger_content_id=challenger_content_id,
+                status="waiting",
+                voting_ends_at=datetime.now() + timedelta(minutes=5)  # 5 хвилин на голосування
+            )
+            
+            session.add(duel)
+            session.commit()
+            
+            logger.info(f"⚔️ Створено дуель між {challenger_id} і {opponent.telegram_id}")
+            return duel
+            
+    except Exception as e:
+        logger.error(f"❌ Помилка створення дуелі: {e}")
+        return None
+
+async def get_active_duels() -> List[Duel]:
+    """Отримати активні дуелі"""
+    try:
+        with get_db_session() as session:
+            return session.query(Duel).filter(
+                Duel.status.in_(["waiting", "active"])
+            ).all()
+    except Exception as e:
+        logger.error(f"❌ Помилка отримання активних дуелей: {e}")
+        return []
+
+async def vote_in_duel(duel_id: int, voter_id: int, vote: str) -> bool:
+    """Проголосувати в дуелі"""
+    try:
+        with get_db_session() as session:
+            # Перевірити чи користувач вже голосував
+            existing_vote = session.query(DuelVote).filter(
+                and_(DuelVote.duel_id == duel_id, DuelVote.voter_id == voter_id)
+            ).first()
+            
+            if existing_vote:
+                return False  # Вже голосував
+            
+            # Додати голос
+            new_vote = DuelVote(
+                duel_id=duel_id,
+                voter_id=voter_id,
+                vote=vote
+            )
+            session.add(new_vote)
+            
+            # Оновити лічильники в дуелі
+            duel = session.query(Duel).filter(Duel.id == duel_id).first()
+            if duel:
+                if vote == "challenger":
+                    duel.challenger_votes += 1
+                elif vote == "opponent":
+                    duel.opponent_votes += 1
                 
                 session.commit()
-                logger.info(f"🔥 Автор {author.id} отримав +{settings.POINTS_FOR_APPROVAL} балів за схвалення контенту")
+                logger.info(f"🗳️ Голос від {voter_id} в дуелі {duel_id}: {vote}")
+                return True
             
-            # Запис дії адміністратора
-            admin_action = AdminAction(
-                admin_id=moderator_id,
-                action_type="approve" if approve else "reject",
-                target_type="content",
-                target_id=content_id,
-                reason=comment
-            )
-            session.add(admin_action)
+    except Exception as e:
+        logger.error(f"❌ Помилка голосування в дуелі: {e}")
+        return False
+
+# ===== ФУНКЦІЇ ДЛЯ СТАТИСТИКИ БОТА =====
+
+async def get_bot_statistics() -> Dict[str, Any]:
+    """Отримати загальну статистику бота"""
+    try:
+        with get_db_session() as session:
+            # Користувачі
+            total_users = session.query(User).count()
+            active_today = session.query(User).filter(
+                User.last_activity >= datetime.now() - timedelta(days=1)
+            ).count()
+            active_week = session.query(User).filter(
+                User.last_activity >= datetime.now() - timedelta(days=7)
+            ).count()
+            
+            # Контент
+            total_content = session.query(Content).count()
+            approved_content = session.query(Content).filter(
+                Content.status == ContentStatus.APPROVED
+            ).count()
+            pending_content = session.query(Content).filter(
+                Content.status == ContentStatus.PENDING
+            ).count()
+            
+            # Дуелі
+            total_duels = session.query(Duel).count()
+            active_duels = session.query(Duel).filter(
+                Duel.status.in_(["waiting", "active"])
+            ).count()
+            
+            return {
+                "users": {
+                    "total": total_users,
+                    "active_today": active_today,
+                    "active_week": active_week
+                },
+                "content": {
+                    "total": total_content,
+                    "approved": approved_content,
+                    "pending": pending_content,
+                    "rejected": total_content - approved_content - pending_content
+                },
+                "duels": {
+                    "total": total_duels,
+                    "active": active_duels
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Помилка отримання статистики бота: {e}")
+        return {}
+
+async def update_bot_statistics():
+    """Оновити щоденну статистику бота"""
+    try:
+        stats = await get_bot_statistics()
+        
+        with get_db_session() as session:
+            today = datetime.now().date()
+            
+            # Знайти або створити запис за сьогодні
+            bot_stats = session.query(BotStatistics).filter(
+                func.date(BotStatistics.date) == today
+            ).first()
+            
+            if not bot_stats:
+                bot_stats = BotStatistics(date=datetime.now())
+                session.add(bot_stats)
+            
+            # Оновити статистику
+            bot_stats.total_users = stats["users"]["total"]
+            bot_stats.active_users_today = stats["users"]["active_today"]
+            bot_stats.active_users_week = stats["users"]["active_week"]
+            bot_stats.total_content = stats["content"]["total"]
+            bot_stats.approved_content = stats["content"]["approved"]
+            bot_stats.pending_content = stats["content"]["pending"]
+            bot_stats.rejected_content = stats["content"]["rejected"]
+            bot_stats.total_duels = stats["duels"]["total"]
+            bot_stats.active_duels = stats["duels"]["active"]
+            
             session.commit()
+            logger.info("📊 Статистика бота оновлена")
             
-            logger.info(f"🔥 Контент {content_id} {'схвалено' if approve else 'відхилено'}")
+    except Exception as e:
+        logger.error(f"❌ Помилка оновлення статистики бота: {e}")
 
-# ===== НОВА ФУНКЦІЯ ДЛЯ НАРАХУВАННЯ БАЛІВ ЗА ЛАЙКИ! =====
-async def add_content_rating(user_id: int, content_id: int, action_type: str, points: int = 0) -> bool:
-    """Додати оцінку контенту та нарахувати бали автору"""
-    with get_db_session() as session:
-        # Перевіряємо чи не ставив вже оцінку
-        existing_rating = session.query(Rating).filter(
-            Rating.user_id == user_id,
-            Rating.content_id == content_id,
-            Rating.action_type == action_type
-        ).first()
-        
-        if existing_rating:
-            return False  # Вже ставив оцінку
-        
-        # Додаємо нову оцінку
-        rating = Rating(
-            user_id=user_id,
-            content_id=content_id,
-            action_type=action_type,
-            points_awarded=points
-        )
-        session.add(rating)
-        
-        # Оновлюємо статистику контенту
-        content = session.query(Content).filter(Content.id == content_id).first()
-        if content:
-            if action_type == "like":
-                content.likes += 1
-                
-                # НОВЕ! Нарахування балів автору за лайк
-                author = session.query(User).filter(User.id == content.author_id).first()
-                if author and author.id != user_id:  # Не можна лайкати свій контент
-                    # Перевіряємо ліміт балів за лайки на день
-                    today = datetime.utcnow().date()
-                    today_bonus_points = session.query(func.sum(Rating.points_awarded)).filter(
-                        Rating.content_id.in_(
-                            session.query(Content.id).filter(Content.author_id == author.id)
-                        ),
-                        Rating.action_type == "like",
-                        func.date(Rating.created_at) == today
-                    ).scalar() or 0
-                    
-                    if today_bonus_points < 10:  # Максимум 10 балів на день за лайки
-                        author.points += 1
-                        rating.points_awarded = 1  # Записуємо що автор отримав бал
-                        
-                        # Оновлюємо ранг якщо потрібно
-                        new_rank = get_rank_by_points(author.points)
-                        if new_rank != author.rank:
-                            author.rank = new_rank
-                        
-                        logger.info(f"💖 Автор {author.id} отримав +1 бал за лайк контенту {content_id}")
-                    
-            elif action_type == "dislike":
-                content.dislikes += 1
-            elif action_type == "share":
-                content.shares += 1
-        
-        session.commit()
-        return True
+# ===== ДОПОМІЖНІ ФУНКЦІЇ =====
 
-# ===== ФУНКЦІЇ ДЛЯ СТАТИСТИКИ =====
-
-async def get_user_stats(user_id: int) -> dict:
-    """Отримання статистики користувача"""
-    with get_db_session() as session:
-        user = session.query(User).filter(User.id == user_id).first()
+async def ensure_user_exists(user_id: int, username: str = None, first_name: str = None) -> User:
+    """Переконатися що користувач існує в БД"""
+    try:
+        user = await get_user_by_id(user_id)
         if not user:
-            return {}
-        
-        return {
-            "user": user,
-            "total_submissions": user.jokes_submitted + user.memes_submitted,
-            "total_approved": user.jokes_approved + user.memes_approved,
-            "approval_rate": round(
-                (user.jokes_approved + user.memes_approved) / max(user.jokes_submitted + user.memes_submitted, 1) * 100,
-                1
+            user = await get_or_create_user(
+                telegram_id=user_id,
+                username=username,
+                first_name=first_name
             )
-        }
+        return user
+    except Exception as e:
+        logger.error(f"❌ Помилка забезпечення існування користувача {user_id}: {e}")
+        return None
 
-async def get_leaderboard(limit: int = 10) -> List[User]:
-    """Отримання таблиці лідерів"""
-    with get_db_session() as session:
-        return session.query(User).order_by(User.points.desc()).limit(limit).all()
-
-# ===== НОВІ ФУНКЦІЇ ДЛЯ ПЕРСОНАЛІЗАЦІЇ =====
-
-async def get_trending_content(content_type: str, limit: int = 5) -> List[Content]:
-    """Отримати трендовий контент"""
-    with get_db_session() as session:
-        ct = ContentType.JOKE if content_type == "joke" else ContentType.MEME
-        
-        return session.query(Content).filter(
-            Content.content_type == ct,
-            Content.status == ContentStatus.APPROVED
-        ).order_by(Content.trending_score.desc()).limit(limit).all()
-
-async def get_popular_content(content_type: str, limit: int = 5) -> List[Content]:
-    """Отримати популярний контент"""
-    with get_db_session() as session:
-        ct = ContentType.JOKE if content_type == "joke" else ContentType.MEME
-        
-        return session.query(Content).filter(
-            Content.content_type == ct,
-            Content.status == ContentStatus.APPROVED
-        ).order_by(Content.popularity_score.desc()).limit(limit).all()
+# ===== ДОДАТИ ДО КІНЦЯ ІСНУЮЧОГО database/database.py =====
