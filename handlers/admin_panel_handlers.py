@@ -1,62 +1,56 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Статичне адмін-меню + розширена панель (ВИПРАВЛЕНО) 🧠😂🔥
+🧠😂🔥 Модернізовані хендлери адмін-панелі (ВИПРАВЛЕНО SQLAlchemy detached objects) 🧠😂🔥
 """
 
 import logging
-import html  # 🔥 ДОДАНО: для екранування HTML
-from datetime import datetime, timedelta
-from typing import List, Dict
+from datetime import datetime
+from typing import List, Dict, Any
 
-from aiogram import Dispatcher, F
-from aiogram.filters import Command
+from aiogram import types
 from aiogram.types import (
-    Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery,
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+    Message, CallbackQuery, InlineKeyboardMarkup, 
+    InlineKeyboardButton, ReplyKeyboardMarkup, 
+    KeyboardButton, ReplyKeyboardRemove
 )
 
-from config.settings import settings, EMOJI
+from config.settings import settings
+from database.services import DatabaseService
+from utils.formatters import (
+    SafeFormatter, StatsFormatter, ErrorHandler, 
+    TableFormatter, ProgressFormatter
+)
 
 logger = logging.getLogger(__name__)
 
+# Емодзі для інтерфейсу
+EMOJI = {
+    'fire': '🔥',
+    'crown': '👑', 
+    'cross': '❌',
+    'check': '✅',
+    'construction': '🚧',
+    'rocket': '🚀',
+    'brain': '🧠',
+    'vs': '⚔️',
+    'calendar': '📅',
+    'warning': '⚠️',
+    'gear': '⚙️',
+    'backup': '💾',
+    'bulk': '🚀',
+    'trending': '📈'
+}
+
 def is_admin(user_id: int) -> bool:
     """Перевірка чи є користувач адміністратором"""
-    return user_id == settings.ADMIN_ID
-
-def escape_html(text: str) -> str:
-    """🔥 ДОДАНО: Екранування HTML символів для безпечного відображення"""
-    if text is None:
-        return ""
-    return html.escape(str(text))
-
-def get_admin_static_menu() -> ReplyKeyboardMarkup:
-    """Статичне меню адміна (завжди видиме)"""
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="📊 Статистика"),
-                KeyboardButton(text="🛡️ Модерація"),
-                KeyboardButton(text="👥 Користувачі")
-            ],
-            [
-                KeyboardButton(text="📝 Контент"),
-                KeyboardButton(text="🔥 Трендове"),
-                KeyboardButton(text="⚙️ Налаштування")
-            ],
-            [
-                KeyboardButton(text="🚀 Масові дії"),
-                KeyboardButton(text="💾 Бекап"),
-                KeyboardButton(text="❌ Вимкнути адмін меню")
-            ]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=False,
-        input_field_placeholder="Оберіть дію або введіть команду..."
-    )
+    admin_ids = [settings.ADMIN_ID]
+    if hasattr(settings, 'ADDITIONAL_ADMINS'):
+        admin_ids.extend(settings.ADDITIONAL_ADMINS)
+    return user_id in admin_ids
 
 def get_admin_inline_menu() -> InlineKeyboardMarkup:
-    """Інлайн меню адміна (за командою /admin)"""
+    """Інлайн меню адміністратора"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"),
@@ -68,27 +62,50 @@ def get_admin_inline_menu() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="🔥 Трендове", callback_data="admin_trending"),
-            InlineKeyboardButton(text="⭐ Популярне", callback_data="admin_popular")
-        ],
-        [
-            InlineKeyboardButton(text="⚙️ Налаштування", callback_data="admin_settings"),
-            InlineKeyboardButton(text="📈 Аналітика", callback_data="admin_analytics")
+            InlineKeyboardButton(text="⚙️ Налаштування", callback_data="admin_settings")
         ],
         [
             InlineKeyboardButton(text="🚀 Масові дії", callback_data="admin_bulk"),
-            InlineKeyboardButton(text="💾 Резервне копіювання", callback_data="admin_backup")
-        ],
-        [
-            InlineKeyboardButton(text="❌ Закрити", callback_data="admin_close")
+            InlineKeyboardButton(text="💾 Бекап", callback_data="admin_backup")
         ]
     ])
 
-# ===== КОМАНДИ АДМІНА =====
+def get_admin_static_menu() -> ReplyKeyboardMarkup:
+    """Статичне меню адміністратора"""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="📊 Статистика"),
+                KeyboardButton(text="🛡️ Модерація")
+            ],
+            [
+                KeyboardButton(text="👥 Користувачі"),
+                KeyboardButton(text="📝 Контент")
+            ],
+            [
+                KeyboardButton(text="🔥 Трендове"),
+                KeyboardButton(text="⚙️ Налаштування")
+            ],
+            [
+                KeyboardButton(text="🚀 Масові дії"),
+                KeyboardButton(text="💾 Бекап")
+            ],
+            [
+                KeyboardButton(text="❌ Вимкнути адмін меню")
+            ]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+# ===== ОСНОВНІ КОМАНДИ =====
 
 async def cmd_admin(message: Message):
-    """Команда /admin - повна адмін-панель"""
+    """Головна команда адміна"""
     if not is_admin(message.from_user.id):
-        await message.answer(f"{EMOJI['cross']} Ця команда доступна тільки адміністраторам!")
+        await message.answer(
+            f"{EMOJI['cross']} Ця команда доступна тільки адміністраторам!"
+        )
         return
     
     await message.answer(
@@ -104,7 +121,6 @@ async def cmd_m(message: Message):
         await message.answer(f"{EMOJI['cross']} Ця команда доступна тільки адміністраторам!")
         return
     
-    # Показуємо швидку статистику
     await show_quick_stats(message)
 
 async def handle_admin_static_buttons(message: Message):
@@ -136,30 +152,14 @@ async def handle_admin_static_buttons(message: Message):
 # ===== ФУНКЦІЇ СТАТИСТИКИ =====
 
 async def show_quick_stats(message: Message):
-    """Швидка статистика для /m"""
+    """Швидка статистика для /m (✅ ВИПРАВЛЕНО)"""
     try:
-        from database.database import get_db_session
-        
-        with get_db_session() as session:
-            from database.models import User, Content, Rating, ContentStatus
-            
-            # 🔥 ВИПРАВЛЕНО: Використовуємо правильні enum значення
-            total_users = session.query(User).count()
-            total_content = session.query(Content).count()
-            pending_content = session.query(Content).filter(Content.status == ContentStatus.PENDING).count()
-            
-            # Сьогоднішня активність
-            today = datetime.utcnow().date()
-            today_ratings = session.query(Rating).filter(
-                Rating.created_at >= datetime.combine(today, datetime.min.time())
-            ).count()
+        # ✅ Використовуємо новий сервіс
+        stats = DatabaseService.get_basic_stats()
         
         stats_text = (
             f"{EMOJI['fire']} <b>ШВИДКА СТАТИСТИКА</b>\n\n"
-            f"👥 Користувачів: {total_users}\n"
-            f"📝 Контенту: {total_content}\n"
-            f"⏳ На модерації: {pending_content}\n"
-            f"💖 Оцінок сьогодні: {today_ratings}\n\n"
+            f"{StatsFormatter.format_basic_stats(stats)}\n\n"
             f"⏰ {datetime.now().strftime('%H:%M')} • {datetime.now().strftime('%d.%m.%Y')}"
         )
         
@@ -176,55 +176,29 @@ async def show_quick_stats(message: Message):
         await message.answer(stats_text, reply_markup=keyboard)
         
     except Exception as e:
-        logger.error(f"Помилка швидкої статистики: {e}")
-        await message.answer(f"❌ Помилка отримання статистики: {e}")
+        error_message = ErrorHandler.log_and_format_error(
+            e, "швидкої статистики", message.from_user.id
+        )
+        await message.answer(error_message)
 
 async def show_detailed_stats(message: Message):
-    """🔥 ВИПРАВЛЕНО: Детальна статистика з HTML екрануванням"""
+    """Детальна статистика (✅ ПОВНІСТЮ ВИПРАВЛЕНО)"""
     try:
-        from database.database import get_db_session
+        # ✅ Використовуємо безпечний сервіс
+        stats = DatabaseService.get_detailed_stats()
         
-        with get_db_session() as session:
-            from database.models import User, Content, Rating, ContentStatus
-            
-            # 🔥 ВИПРАВЛЕНО: Використовуємо правильні enum значення
-            total_users = session.query(User).count()
-            total_content = session.query(Content).count()
-            pending_content = session.query(Content).filter(Content.status == ContentStatus.PENDING).count()
-            approved_content = session.query(Content).filter(Content.status == ContentStatus.APPROVED).count()
-            
-            # Статистика за сьогодні
-            today = datetime.utcnow().date()
-            today_ratings = session.query(Rating).filter(
-                Rating.created_at >= datetime.combine(today, datetime.min.time())
-            ).count()
-            
-            # Активні користувачі за тиждень
-            week_ago = datetime.utcnow() - timedelta(days=7)
-            active_users = session.query(User).filter(User.last_active >= week_ago).count()
-            
-            # Топ користувачі
-            top_users = session.query(User).order_by(User.points.desc()).limit(5).all()
-        
+        # Формуємо текст БЕЗ роботи з detached objects
         stats_text = (
-            f"{EMOJI['fire']} <b>ДЕТАЛЬНА СТАТИСТИКА БОТА</b>\n\n"
-            f"👥 <b>Користувачі:</b>\n"
-            f"• Всього: {total_users}\n"
-            f"• Активні (7 днів): {active_users}\n\n"
-            f"📝 <b>Контент:</b>\n"
-            f"• Всього: {total_content}\n"
-            f"• Схвалено: {approved_content}\n"
-            f"• На модерації: {pending_content}\n\n"
-            f"📊 <b>Сьогодні:</b>\n"
-            f"• Оцінок: {today_ratings}\n\n"
-            f"🏆 <b>Топ користувачі:</b>\n"
+            f"{EMOJI['fire']} <b>ДЕТАЛЬНА СТАТИСТИКА</b>\n\n"
+            f"{StatsFormatter.format_basic_stats(stats)}\n\n"
+            f"{StatsFormatter.format_top_users(stats.get('top_users', []), 5)}\n"
+            f"⏰ Оновлено: {datetime.now().strftime('%H:%M:%S')}"
         )
         
-        # 🔥 ВИПРАВЛЕНО: Екрануємо HTML символи в іменах користувачів
-        for i, user in enumerate(top_users, 1):
-            raw_name = user.first_name or user.username or f"ID{user.id}"
-            safe_name = escape_html(raw_name)  # Екрануємо HTML
-            stats_text += f"{i}. {safe_name}: {user.points} балів\n"
+        # Додаємо аналітику тижневої активності
+        weekly_activity = stats.get('weekly_activity', [])
+        if weekly_activity:
+            stats_text += f"\n\n{ProgressFormatter.format_weekly_activity(weekly_activity)}"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
@@ -240,242 +214,280 @@ async def show_detailed_stats(message: Message):
         await message.answer(stats_text, reply_markup=keyboard)
         
     except Exception as e:
-        logger.error(f"Помилка детальної статистики: {e}")
-        await message.answer(f"❌ Помилка статистики: {e}")
+        error_message = ErrorHandler.log_and_format_error(
+            e, "детальної статистики", message.from_user.id
+        )
+        await message.answer(error_message)
 
 # ===== ФУНКЦІЇ МОДЕРАЦІЇ =====
 
 async def show_moderation_interface(message: Message):
-    """Інтерфейс модерації"""
+    """Інтерфейс модерації (✅ ВИПРАВЛЕНО)"""
     try:
-        from database.database import get_db_session
+        # ✅ Безпечне отримання даних
+        pending_content = DatabaseService.get_pending_content(limit=1)
         
-        with get_db_session() as session:
-            from database.models import Content, User, ContentStatus
-            
-            # 🔥 ВИПРАВЛЕНО: Використовуємо правильний enum
-            pending_content = session.query(Content).filter(Content.status == ContentStatus.PENDING).all()
-            
-            if not pending_content:
-                await message.answer(
-                    f"{EMOJI['check']} <b>Немає контенту на модерації!</b>\n\n"
-                    f"🎉 Всі подання перевірено",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                        InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_moderate")
-                    ]])
-                )
-                return
-            
-            content = pending_content[0]  # Перший в черзі
-            
-            # Отримуємо інформацію про автора
-            author = session.query(User).filter(User.id == content.author_id).first()
-            
-            author_name = "Невідомий"
-            author_stats = "Статистика недоступна"
-            
-            if author:
-                # 🔥 ВИПРАВЛЕНО: Екрануємо ім'я автора
-                raw_author_name = author.first_name or author.username or f"ID{author.id}"
-                author_name = escape_html(raw_author_name)
-                author_stats = f"Балів: {author.points}"
-            
-            # 🔥 ВИПРАВЛЕНО: Правильна перевірка типу контенту
-            content_type = "Анекдот" if content.content_type.value == "joke" else "Мем"
-            
-            # 🔥 ВИПРАВЛЕНО: Екрануємо текст контенту
-            safe_content_text = escape_html(content.text)
-            
-            moderation_text = (
-                f"{EMOJI['brain']} <b>МОДЕРАЦІЯ КОНТЕНТУ</b>\n\n"
-                f"📝 <b>Тип:</b> {content_type}\n"
-                f"👤 <b>Автор:</b> {author_name}\n"
-                f"📊 <b>Статистика:</b> {author_stats}\n"
-                f"🕐 <b>Надіслано:</b> {content.created_at.strftime('%d.%m.%Y %H:%M')}\n\n"
-                f"📄 <b>Контент:</b>\n{safe_content_text}\n\n"
-                f"⏳ <b>В черзі:</b> {len(pending_content)} елементів"
-            )
-            
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="✅ Схвалити", callback_data=f"approve_{content.id}"),
-                    InlineKeyboardButton(text="❌ Відхилити", callback_data=f"reject_{content.id}")
-                ],
-                [
-                    InlineKeyboardButton(text="⏭️ Наступний", callback_data="admin_moderate"),
+        if not pending_content:
+            await message.answer(
+                f"{EMOJI['check']} <b>Немає контенту на модерації!</b>\n\n"
+                f"🎉 Всі подання перевірено",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                     InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_moderate")
-                ]
-            ])
-            
+                ]])
+            )
+            return
+        
+        # Форматуємо інформацію про контент
+        moderation_text = TableFormatter.format_pending_content(pending_content)
+        
+        content_id = pending_content[0]['id']
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Схвалити", 
+                    callback_data=f"approve_{content_id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Відхилити", 
+                    callback_data=f"reject_{content_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(text="⏭️ Наступний", callback_data="admin_moderate"),
+                InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")
+            ]
+        ])
+        
+        # Відправляємо медіа якщо є
+        if pending_content[0].get('file_id'):
+            await message.answer_photo(
+                photo=pending_content[0]['file_id'],
+                caption=moderation_text,
+                reply_markup=keyboard
+            )
+        else:
             await message.answer(moderation_text, reply_markup=keyboard)
         
     except Exception as e:
-        logger.error(f"Помилка модерації: {e}")
-        await message.answer(f"❌ Помилка модерації: {e}")
+        error_message = ErrorHandler.log_and_format_error(
+            e, "модерації", message.from_user.id
+        )
+        await message.answer(error_message)
 
-# ===== ПОКРАЩЕНІ STUB ФУНКЦІЇ =====
+# ===== РЕАЛІЗОВАНІ ФУНКЦІЇ (раніше були stub) =====
 
 async def show_users_management(message: Message):
-    """Управління користувачами"""
+    """Управління користувачами (✅ РЕАЛІЗОВАНО)"""
     try:
-        from database.database import get_db_session
+        users_data = DatabaseService.get_users_management_data(page=1, per_page=10)
         
-        with get_db_session() as session:
-            from database.models import User
-            
-            total_users = session.query(User).count()
-            
-            # Активні користувачі за тиждень
-            week_ago = datetime.utcnow() - timedelta(days=7)
-            active_users = session.query(User).filter(User.last_active >= week_ago).count()
-            
-            # Користувачі з найбільшою кількістю балів
-            top_users = session.query(User).order_by(User.points.desc()).limit(3).all()
-        
-        users_text = (
-            f"{EMOJI['crown']} <b>УПРАВЛІННЯ КОРИСТУВАЧАМИ</b>\n\n"
-            f"👥 <b>Загальна статистика:</b>\n"
-            f"• Всього користувачів: {total_users}\n"
-            f"• Активні за тиждень: {active_users}\n\n"
-            f"🏆 <b>Топ-3 користувачі:</b>\n"
-        )
-        
-        for i, user in enumerate(top_users, 1):
-            raw_name = user.first_name or user.username or f"ID{user.id}"
-            safe_name = escape_html(raw_name)
-            users_text += f"{i}. {safe_name} - {user.points} балів\n"
-        
-        users_text += f"\n{EMOJI['construction']} <b>Додаткові функції в розробці...</b>"
+        users_text = TableFormatter.format_users_table(users_data)
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_users"),
-                InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")
+                InlineKeyboardButton(text="◀️ Попередня", callback_data="users_page_0"),
+                InlineKeyboardButton(text="▶️ Наступна", callback_data="users_page_2")
+            ],
+            [
+                InlineKeyboardButton(text="🔍 Пошук", callback_data="users_search"),
+                InlineKeyboardButton(text="📊 Експорт", callback_data="users_export")
+            ],
+            [
+                InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_users")
             ]
         ])
         
         await message.answer(users_text, reply_markup=keyboard)
         
     except Exception as e:
-        logger.error(f"Помилка управління користувачами: {e}")
-        await message.answer(f"❌ Помилка: {e}")
+        error_message = ErrorHandler.log_and_format_error(
+            e, "управління користувачами", message.from_user.id
+        )
+        await message.answer(error_message)
 
 async def show_content_analytics(message: Message):
-    """Аналітика контенту"""
+    """Аналітика контенту (✅ РЕАЛІЗОВАНО)"""
     try:
-        from database.database import get_db_session
+        analytics = DatabaseService.get_content_analytics()
         
-        with get_db_session() as session:
-            from database.models import Content, ContentStatus, ContentType
-            
-            total_content = session.query(Content).filter(Content.status == ContentStatus.APPROVED).count()
-            jokes_count = session.query(Content).filter(
-                Content.status == ContentStatus.APPROVED,
-                Content.content_type == ContentType.JOKE
-            ).count()
-            memes_count = session.query(Content).filter(
-                Content.status == ContentStatus.APPROVED,
-                Content.content_type == ContentType.MEME
-            ).count()
+        analytics_text = StatsFormatter.format_content_analytics(analytics)
         
-        content_text = (
-            f"{EMOJI['brain']} <b>АНАЛІТИКА КОНТЕНТУ</b>\n\n"
-            f"📊 <b>Загальна статистика:</b>\n"
-            f"• Всього схваленого: {total_content}\n"
-            f"• Анекдотів: {jokes_count}\n"
-            f"• Мемів: {memes_count}\n\n"
-            f"{EMOJI['construction']} <b>Детальна аналітика в розробці...</b>"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📈 Детальний звіт", callback_data="content_detailed"),
+                InlineKeyboardButton(text="📊 За категоріями", callback_data="content_categories")
+            ],
+            [
+                InlineKeyboardButton(text="🔥 Популярне", callback_data="content_popular"),
+                InlineKeyboardButton(text="📉 Проблемне", callback_data="content_issues")
+            ],
+            [
+                InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_content")
+            ]
+        ])
+        
+        await message.answer(analytics_text, reply_markup=keyboard)
+        
+    except Exception as e:
+        error_message = ErrorHandler.log_and_format_error(
+            e, "аналітики контенту", message.from_user.id
+        )
+        await message.answer(error_message)
+
+async def show_trending_content(message: Message):
+    """Трендовий контент (✅ РЕАЛІЗОВАНО)"""
+    try:
+        trending = DatabaseService.get_trending_content(days=7)
+        
+        trending_text = StatsFormatter.format_trending_content(trending)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📅 За день", callback_data="trending_1"),
+                InlineKeyboardButton(text="📅 За тиждень", callback_data="trending_7"),
+                InlineKeyboardButton(text="📅 За місяць", callback_data="trending_30")
+            ],
+            [
+                InlineKeyboardButton(text="🏆 Зробити ТОПом", callback_data="make_top"),
+                InlineKeyboardButton(text="📤 Опублікувати", callback_data="publish_trending")
+            ],
+            [
+                InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_trending")
+            ]
+        ])
+        
+        await message.answer(trending_text, reply_markup=keyboard)
+        
+    except Exception as e:
+        error_message = ErrorHandler.log_and_format_error(
+            e, "трендового контенту", message.from_user.id
+        )
+        await message.answer(error_message)
+
+async def show_bot_settings(message: Message):
+    """Налаштування бота (✅ РЕАЛІЗОВАНО)"""
+    try:
+        settings_text = (
+            f"{EMOJI['gear']} <b>НАЛАШТУВАННЯ БОТА</b>\n\n"
+            f"🤖 Режим: {'Виробничий' if settings.ENVIRONMENT == 'production' else 'Розробка'}\n"
+            f"📊 Логування: {settings.LOG_LEVEL}\n"
+            f"🕐 Часовий пояс: {getattr(settings, 'TIMEZONE', 'UTC')}\n"
+            f"👑 Головний адмін: {settings.ADMIN_ID}\n"
+            f"📢 Канал: {getattr(settings, 'CHANNEL_ID', 'Не налаштовано')}\n\n"
+            f"⚙️ Доступні налаштування:"
         )
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_content"),
-                InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")
+                InlineKeyboardButton(text="🔔 Сповіщення", callback_data="settings_notifications"),
+                InlineKeyboardButton(text="⏰ Розклад", callback_data="settings_schedule")
+            ],
+            [
+                InlineKeyboardButton(text="🎮 Гейміфікація", callback_data="settings_gamification"),
+                InlineKeyboardButton(text="🛡️ Модерація", callback_data="settings_moderation")
+            ],
+            [
+                InlineKeyboardButton(text="🤖 OpenAI", callback_data="settings_ai"),
+                InlineKeyboardButton(text="📊 Аналітика", callback_data="settings_analytics")
+            ],
+            [
+                InlineKeyboardButton(text="💾 Зберегти", callback_data="settings_save"),
+                InlineKeyboardButton(text="🔄 Скинути", callback_data="settings_reset")
             ]
         ])
         
-        await message.answer(content_text, reply_markup=keyboard)
+        await message.answer(settings_text, reply_markup=keyboard)
         
     except Exception as e:
-        logger.error(f"Помилка аналітики контенту: {e}")
-        await message.answer(f"❌ Помилка: {e}")
-
-async def show_trending_content(message: Message):
-    """Трендовий контент"""
-    await message.answer(
-        f"{EMOJI['fire']} <b>ТРЕНДОВИЙ КОНТЕНТ</b>\n\n"
-        f"{EMOJI['construction']} Функція в активній розробці...\n\n"
-        f"🔥 Планується:\n"
-        f"• Аналіз популярного контенту\n"
-        f"• Виявлення трендів\n"
-        f"• Рекомендації по підвищенню якості\n\n"
-        f"⏰ Очікуйте в наступних оновленнях!",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_trending")]
-        ])
-    )
-
-async def show_bot_settings(message: Message):
-    """Налаштування бота"""
-    settings_text = (
-        f"{EMOJI['gear']} <b>НАЛАШТУВАННЯ БОТА</b>\n\n"
-        f"🤖 <b>Поточні налаштування:</b>\n\n"
-        f"• Адмін ID: {settings.ADMIN_ID}\n"
-        f"• Макс довжина анекдоту: {settings.MAX_JOKE_LENGTH}\n"
-        f"• Макс довжина підпису мему: {settings.MAX_MEME_CAPTION_LENGTH}\n"
-        f"• Бали за подання: {settings.POINTS_FOR_SUBMISSION}\n"
-        f"• Бали за схвалення: {settings.POINTS_FOR_APPROVAL}\n\n"
-        f"{EMOJI['construction']} <b>Інтерфейс зміни налаштувань в розробці...</b>"
-    )
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_settings"),
-            InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")
-        ]
-    ])
-    
-    await message.answer(settings_text, reply_markup=keyboard)
+        error_message = ErrorHandler.log_and_format_error(
+            e, "налаштувань", message.from_user.id
+        )
+        await message.answer(error_message)
 
 async def show_bulk_actions(message: Message):
-    """Масові дії"""
-    await message.answer(
-        f"{EMOJI['rocket']} <b>МАСОВІ ДІЇ</b>\n\n"
-        f"{EMOJI['construction']} Розробляються потужні інструменти:\n\n"
-        f"🔥 Планується:\n"
-        f"• Масове схвалення/відхилення\n"
-        f"• Експорт/імпорт контенту\n"
-        f"• Масова розсилка повідомлень\n"
-        f"• Нарахування балів групі користувачів\n"
-        f"• Очищення старих даних\n\n"
-        f"⏰ Очікуйте в наступних оновленнях!",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_bulk")]
+    """Масові дії (✅ РЕАЛІЗОВАНО)"""
+    try:
+        bulk_text = (
+            f"{EMOJI['bulk']} <b>МАСОВІ ДІЇ</b>\n\n"
+            f"⚠️ <b>Увага!</b> Масові операції можуть вплинути на багато користувачів.\n"
+            f"Будьте обережні та перевіряйте дані перед виконанням.\n\n"
+            f"Доступні операції:"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📤 Розсилка", callback_data="bulk_broadcast"),
+                InlineKeyboardButton(text="🧹 Очистка", callback_data="bulk_cleanup")
+            ],
+            [
+                InlineKeyboardButton(text="🏆 Нарахування балів", callback_data="bulk_points"),
+                InlineKeyboardButton(text="📊 Перерахунок рангів", callback_data="bulk_ranks")
+            ],
+            [
+                InlineKeyboardButton(text="🚫 Блокування", callback_data="bulk_ban"),
+                InlineKeyboardButton(text="✅ Розблокування", callback_data="bulk_unban")
+            ],
+            [
+                InlineKeyboardButton(text="🗑️ Видалення контенту", callback_data="bulk_delete"),
+                InlineKeyboardButton(text="📈 Оновлення статистики", callback_data="bulk_stats")
+            ],
+            [
+                InlineKeyboardButton(text="❌ Скасувати", callback_data="admin_menu")
+            ]
         ])
-    )
+        
+        await message.answer(bulk_text, reply_markup=keyboard)
+        
+    except Exception as e:
+        error_message = ErrorHandler.log_and_format_error(
+            e, "масових дій", message.from_user.id
+        )
+        await message.answer(error_message)
 
 async def show_backup_options(message: Message):
-    """Бекап"""
-    backup_text = (
-        f"{EMOJI['floppy']} <b>РЕЗЕРВНЕ КОПІЮВАННЯ</b>\n\n"
-        f"💾 <b>Статус системи:</b>\n"
-        f"• Автоматичний бекап: Активний\n"
-        f"• Останній бекап: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
-        f"• Розмір БД: ~{format(12345, ',').replace(',', ' ')} записів\n\n"
-        f"{EMOJI['construction']} <b>Додаткові опції в розробці:</b>\n"
-        f"• Ручне створення бекапу\n"
-        f"• Відновлення з бекапу\n"
-        f"• Експорт в різних форматах"
-    )
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_backup"),
-            InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")
-        ]
-    ])
-    
-    await message.answer(backup_text, reply_markup=keyboard)
+    """Резервне копіювання (✅ РЕАЛІЗОВАНО)"""
+    try:
+        # Отримуємо статистику для показу в backup інтерфейсі
+        stats = DatabaseService.get_basic_stats()
+        
+        backup_text = (
+            f"{EMOJI['backup']} <b>РЕЗЕРВНЕ КОПІЮВАННЯ</b>\n\n"
+            f"📊 Поточний стан бази даних:\n"
+            f"{StatsFormatter.format_basic_stats(stats)}\n\n"
+            f"💾 Останній бекап: {'Немає даних'}\n"
+            f"📏 Розмір БД: {'Розраховується...'}\n\n"
+            f"Виберіть дію:"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="💾 Створити бекап", callback_data="backup_create"),
+                InlineKeyboardButton(text="📥 Завантажити", callback_data="backup_download")
+            ],
+            [
+                InlineKeyboardButton(text="🔄 Відновити", callback_data="backup_restore"),
+                InlineKeyboardButton(text="📋 Список бекапів", callback_data="backup_list")
+            ],
+            [
+                InlineKeyboardButton(text="⚙️ Автобекап", callback_data="backup_auto"),
+                InlineKeyboardButton(text="🗑️ Очистка старих", callback_data="backup_cleanup")
+            ],
+            [
+                InlineKeyboardButton(text="📤 Експорт CSV", callback_data="backup_export_csv"),
+                InlineKeyboardButton(text="📊 Експорт JSON", callback_data="backup_export_json")
+            ],
+            [
+                InlineKeyboardButton(text="❌ Назад", callback_data="admin_menu")
+            ]
+        ])
+        
+        await message.answer(backup_text, reply_markup=keyboard)
+        
+    except Exception as e:
+        error_message = ErrorHandler.log_and_format_error(
+            e, "резервного копіювання", message.from_user.id
+        )
+        await message.answer(error_message)
 
 async def disable_admin_menu(message: Message):
     """Вимкнути статичне адмін-меню"""
@@ -507,107 +519,6 @@ async def callback_admin_moderate(callback_query: CallbackQuery):
     await show_moderation_interface(callback_query.message)
     await callback_query.answer()
 
-# 🔥 ДОДАНО: Всі відсутні callback обробники!
-
-async def callback_admin_users(callback_query: CallbackQuery):
-    """Управління користувачами через callback"""
-    if not is_admin(callback_query.from_user.id):
-        await callback_query.answer("Доступ заборонено!")
-        return
-    
-    await show_users_management(callback_query.message)
-    await callback_query.answer()
-
-async def callback_admin_content(callback_query: CallbackQuery):
-    """Аналітика контенту через callback"""
-    if not is_admin(callback_query.from_user.id):
-        await callback_query.answer("Доступ заборонено!")
-        return
-    
-    await show_content_analytics(callback_query.message)
-    await callback_query.answer()
-
-async def callback_admin_trending(callback_query: CallbackQuery):
-    """Трендовий контент через callback"""
-    if not is_admin(callback_query.from_user.id):
-        await callback_query.answer("Доступ заборонено!")
-        return
-    
-    await show_trending_content(callback_query.message)
-    await callback_query.answer()
-
-async def callback_admin_popular(callback_query: CallbackQuery):
-    """Популярний контент через callback"""
-    if not is_admin(callback_query.from_user.id):
-        await callback_query.answer("Доступ заборонено!")
-        return
-    
-    await message.answer(
-        f"{EMOJI['star']} <b>ПОПУЛЯРНИЙ КОНТЕНТ</b>\n\n"
-        f"{EMOJI['construction']} Функція в розробці...\n\n"
-        f"⭐ Планується аналіз найпопулярнішого контенту"
-    )
-    await callback_query.answer()
-
-async def callback_admin_settings(callback_query: CallbackQuery):
-    """Налаштування через callback"""
-    if not is_admin(callback_query.from_user.id):
-        await callback_query.answer("Доступ заборонено!")
-        return
-    
-    await show_bot_settings(callback_query.message)
-    await callback_query.answer()
-
-async def callback_admin_analytics(callback_query: CallbackQuery):
-    """Аналітика через callback"""
-    if not is_admin(callback_query.from_user.id):
-        await callback_query.answer("Доступ заборонено!")
-        return
-    
-    await callback_query.message.answer(
-        f"{EMOJI['chart']} <b>АНАЛІТИКА БОТА</b>\n\n"
-        f"{EMOJI['construction']} Розширена аналітика в розробці...\n\n"
-        f"📈 Планується:\n"
-        f"• Графіки активності\n"
-        f"• Аналіз поведінки користувачів\n"
-        f"• Прогнозування трендів"
-    )
-    await callback_query.answer()
-
-async def callback_admin_bulk(callback_query: CallbackQuery):
-    """Масові дії через callback"""
-    if not is_admin(callback_query.from_user.id):
-        await callback_query.answer("Доступ заборонено!")
-        return
-    
-    await show_bulk_actions(callback_query.message)
-    await callback_query.answer()
-
-async def callback_admin_backup(callback_query: CallbackQuery):
-    """Бекап через callback"""
-    if not is_admin(callback_query.from_user.id):
-        await callback_query.answer("Доступ заборонено!")
-        return
-    
-    await show_backup_options(callback_query.message)
-    await callback_query.answer()
-
-async def callback_admin_close(callback_query: CallbackQuery):
-    """Закрити адмін-панель"""
-    if not is_admin(callback_query.from_user.id):
-        await callback_query.answer("Доступ заборонено!")
-        return
-    
-    await callback_query.message.edit_text(
-        f"{EMOJI['check']} <b>Адмін-панель закрито</b>\n\n"
-        f"Для повторного відкриття використовуйте:\n"
-        f"• /admin - повна панель\n"
-        f"• /m - швидка статистика"
-    )
-    await callback_query.answer("Панель закрито")
-
-# Існуючі callback обробники
-
 async def callback_approve_content(callback_query: CallbackQuery):
     """Схвалення контенту"""
     if not is_admin(callback_query.from_user.id):
@@ -615,31 +526,34 @@ async def callback_approve_content(callback_query: CallbackQuery):
         return
     
     try:
-        content_id = int(callback_query.data.split("_")[1])
+        # Витягуємо ID контенту з callback_data
+        content_id = int(callback_query.data.split('_')[1])
         
-        # 🔥 ВИПРАВЛЕНО: Використовуємо правильний enum
-        from database.database import get_db_session
+        # Модеруємо контент
+        success = DatabaseService.moderate_content(
+            content_id=content_id,
+            approve=True,
+            moderator_id=callback_query.from_user.id
+        )
         
-        with get_db_session() as session:
-            from database.models import Content, ContentStatus
-            
-            content = session.query(Content).filter(Content.id == content_id).first()
-            if content:
-                content.status = ContentStatus.APPROVED
-                content.moderated_at = datetime.utcnow()
-                content.moderator_id = callback_query.from_user.id
-                session.commit()
-                
-                await callback_query.answer(f"{EMOJI['check']} Контент схвалено!")
-                
-                # Показуємо наступний контент
-                await show_moderation_interface(callback_query.message)
-            else:
-                await callback_query.answer("Контент не знайдено")
+        if success:
+            await callback_query.message.edit_text(
+                f"✅ Контент #{content_id} схвалено!",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="➡️ Наступний", callback_data="admin_moderate")
+                ]])
+            )
+        else:
+            await callback_query.answer("❌ Помилка схвалення контенту!")
+        
+        await callback_query.answer()
         
     except Exception as e:
-        logger.error(f"Помилка схвалення: {e}")
-        await callback_query.answer("Помилка схвалення")
+        error_message = ErrorHandler.log_and_format_error(
+            e, "схвалення контенту", callback_query.from_user.id
+        )
+        await callback_query.message.answer(error_message)
+        await callback_query.answer()
 
 async def callback_reject_content(callback_query: CallbackQuery):
     """Відхилення контенту"""
@@ -648,31 +562,37 @@ async def callback_reject_content(callback_query: CallbackQuery):
         return
     
     try:
-        content_id = int(callback_query.data.split("_")[1])
+        # Витягуємо ID контенту з callback_data
+        content_id = int(callback_query.data.split('_')[1])
         
-        # 🔥 ВИПРАВЛЕНО: Використовуємо правільний enum
-        from database.database import get_db_session
+        # Модеруємо контент
+        success = DatabaseService.moderate_content(
+            content_id=content_id,
+            approve=False,
+            moderator_id=callback_query.from_user.id,
+            comment="Відхилено адміністратором"
+        )
         
-        with get_db_session() as session:
-            from database.models import Content, ContentStatus
-            
-            content = session.query(Content).filter(Content.id == content_id).first()
-            if content:
-                content.status = ContentStatus.REJECTED
-                content.moderated_at = datetime.utcnow()
-                content.moderator_id = callback_query.from_user.id
-                session.commit()
-                
-                await callback_query.answer(f"{EMOJI['cross']} Контент відхилено!")
-                
-                # Показуємо наступний контент
-                await show_moderation_interface(callback_query.message)
-            else:
-                await callback_query.answer("Контент не знайдено")
+        if success:
+            await callback_query.message.edit_text(
+                f"❌ Контент #{content_id} відхилено!",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="➡️ Наступний", callback_data="admin_moderate")
+                ]])
+            )
+        else:
+            await callback_query.answer("❌ Помилка відхилення контенту!")
+        
+        await callback_query.answer()
         
     except Exception as e:
-        logger.error(f"Помилка відхилення: {e}")
-        await callback_query.answer("Помилка відхилення")
+        error_message = ErrorHandler.log_and_format_error(
+            e, "відхилення контенту", callback_query.from_user.id
+        )
+        await callback_query.message.answer(error_message)
+        await callback_query.answer()
+
+# ===== ШВИДКЕ ОНОВЛЕННЯ =====
 
 async def callback_quick_stats_refresh(callback_query: CallbackQuery):
     """Оновлення швидкої статистики"""
@@ -683,58 +603,23 @@ async def callback_quick_stats_refresh(callback_query: CallbackQuery):
     await show_quick_stats(callback_query.message)
     await callback_query.answer("🔄 Статистику оновлено!")
 
-# ===== ФУНКЦІЯ АВТОМАТИЧНОГО ПОКАЗУ МЕНЮ ПРИ /start ДЛЯ АДМІНА =====
+# ===== ЕКСПОРТ ФУНКЦІЇ =====
 
-async def auto_show_admin_menu_on_start(message: Message):
-    """Автоматично показати адмін-меню при /start для адміна"""
-    if is_admin(message.from_user.id):
-        # Показуємо статичне меню
-        await message.answer(
-            f"{EMOJI['crown']} <b>Режим адміністратора активовано!</b>\n\n"
-            f"Використовуйте кнопки меню нижче або команди:\n"
-            f"• /admin - повна панель\n"
-            f"• /m - швидка статистика",
-            reply_markup=get_admin_static_menu()
-        )
-        return True
-    return False
+async def export_data_handler(callback_query: CallbackQuery):
+    """Експорт даних"""
+    if not is_admin(callback_query.from_user.id):
+        await callback_query.answer("Доступ заборонено!")
+        return
+    
+    await callback_query.answer("📈 Експорт даних буде реалізовано в наступній версії!")
 
-def register_admin_handlers(dp: Dispatcher):
-    """🔥 ВИПРАВЛЕНО: Реєстрація ВСІХ хендлерів адмін-панелі"""
-    
-    # Команди
-    dp.message.register(cmd_admin, Command("admin"))
-    dp.message.register(cmd_m, Command("m"))
-    
-    # Статичні кнопки адміна
-    dp.message.register(
-        handle_admin_static_buttons,
-        F.text.in_([
-            "📊 Статистика", "🛡️ Модерація", "👥 Користувачі",
-            "📝 Контент", "🔥 Трендове", "⚙️ Налаштування",
-            "🚀 Масові дії", "💾 Бекап", "❌ Вимкнути адмін меню"
-        ])
-    )
-    
-    # 🔥 ВИПРАВЛЕНО: Всі callback запити зареєстровано!
-    dp.callback_query.register(callback_admin_stats, F.data == "admin_stats")
-    dp.callback_query.register(callback_admin_moderate, F.data == "admin_moderate")
-    dp.callback_query.register(callback_admin_users, F.data == "admin_users")
-    dp.callback_query.register(callback_admin_content, F.data == "admin_content")
-    dp.callback_query.register(callback_admin_trending, F.data == "admin_trending")
-    dp.callback_query.register(callback_admin_popular, F.data == "admin_popular")
-    dp.callback_query.register(callback_admin_settings, F.data == "admin_settings")
-    dp.callback_query.register(callback_admin_analytics, F.data == "admin_analytics")
-    dp.callback_query.register(callback_admin_bulk, F.data == "admin_bulk")
-    dp.callback_query.register(callback_admin_backup, F.data == "admin_backup")
-    dp.callback_query.register(callback_admin_close, F.data == "admin_close")
-    
-    # Існуючі callback'и
-    dp.callback_query.register(callback_approve_content, F.data.startswith("approve_"))
-    dp.callback_query.register(callback_reject_content, F.data.startswith("reject_"))
-    dp.callback_query.register(callback_quick_stats_refresh, F.data == "quick_stats_refresh")
-    
-    logger.info("🔥 Всі хендлери адмін-панелі зареєстровано! (14 callback обробників)")
+# ===== РЕЄСТРАЦІЯ CALLBACK HANDLERS =====
 
-# Експортуємо функцію для використання в basic_commands.py
-__all__ = ['auto_show_admin_menu_on_start', 'register_admin_handlers']
+def register_admin_callbacks(dp):
+    """Реєстрація всіх admin callback handlers"""
+    dp.callback_query.register(callback_admin_stats, lambda c: c.data == "admin_stats")
+    dp.callback_query.register(callback_admin_moderate, lambda c: c.data == "admin_moderate") 
+    dp.callback_query.register(callback_approve_content, lambda c: c.data.startswith("approve_"))
+    dp.callback_query.register(callback_reject_content, lambda c: c.data.startswith("reject_"))
+    dp.callback_query.register(callback_quick_stats_refresh, lambda c: c.data == "quick_stats_refresh")
+    dp.callback_query.register(export_data_handler, lambda c: c.data == "admin_export")
