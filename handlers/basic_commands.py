@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Основні команди бота з інтеграцією адмін-меню 🧠😂🔥
+🧠😂🔥 Основні команди бота з інтеграцією адмін-меню (ВИПРАВЛЕНО) 🧠😂🔥
 """
 
 import logging
@@ -14,6 +14,18 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 from config.settings import settings, EMOJI, TEXTS
 
 logger = logging.getLogger(__name__)
+
+# ===== FALLBACK ЗНАЧЕННЯ ДЛЯ БЕЗПЕКИ =====
+def get_setting(attr_name: str, default_value):
+    """Безпечне отримання налаштувань з fallback"""
+    return getattr(settings, attr_name, default_value)
+
+# Константи балів з fallback
+POINTS_FOR_SUBMISSION = get_setting('POINTS_FOR_SUBMISSION', 10)
+POINTS_FOR_DUEL_WIN = get_setting('POINTS_FOR_DUEL_WIN', 15)
+POINTS_FOR_DAILY_ACTIVITY = get_setting('POINTS_FOR_DAILY_ACTIVITY', 2)
+POINTS_FOR_REACTION = get_setting('POINTS_FOR_REACTION', 5)
+POINTS_FOR_APPROVAL = get_setting('POINTS_FOR_APPROVAL', 20)
 
 async def cmd_start(message: Message):
     """Команда /start з автоматичним адмін-меню"""
@@ -71,9 +83,9 @@ async def cmd_start(message: Message):
         f"{EMOJI['star']} <b>Що я вмію:</b>\n"
         f"{EMOJI['laugh']} Випадкові меми (+1 бал)\n"
         f"{EMOJI['brain']} Українські анекдоти (+1 бал)\n"
-        f"{EMOJI['fire']} Прийом ваших жартів (+{settings.POINTS_FOR_SUBMISSION} балів)\n"
-        f"{EMOJI['calendar']} Щоденна розсилка (+{settings.POINTS_FOR_DAILY_ACTIVITY} бали)\n"
-        f"{EMOJI['vs']} Дуелі жартів (+{settings.POINTS_FOR_DUEL_WIN} за перемогу)\n\n"
+        f"{EMOJI['fire']} Прийом ваших жартів (+{POINTS_FOR_SUBMISSION} балів)\n"
+        f"{EMOJI['calendar']} Щоденна розсилка (+{POINTS_FOR_DAILY_ACTIVITY} бали)\n"
+        f"{EMOJI['vs']} Дуелі жартів (+{POINTS_FOR_DUEL_WIN} за перемогу)\n\n"
         f"{EMOJI['party']} <b>Збирайте бали, підвищуйте ранг і ставайте легендою гумору!</b>\n\n"
         f"Почніть з кнопок нижче або команди /help"
     )
@@ -84,7 +96,7 @@ async def cmd_start(message: Message):
     logger.info(f"🎉 Користувач {user_id} ({first_name}) запустив бота")
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Головне меню бота"""
+    """Головне меню бота (✅ ВИПРАВЛЕНО)"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text=f"{EMOJI['laugh']} Мем (+1)", callback_data="get_meme"),
@@ -96,22 +108,22 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text=f"{EMOJI['calendar']} Щоденна розсилка", callback_data="toggle_daily"),
-            InlineKeyboardButton(text=f"{EMOJI['fire']} Надіслати жарт (+{settings.POINTS_FOR_SUBMISSION})", callback_data="submit_content")
+            InlineKeyboardButton(text=f"{EMOJI['fire']} Надіслати жарт (+{POINTS_FOR_SUBMISSION})", callback_data="submit_content")
         ],
         [
-            InlineKeyboardButton(text=f"{EMOJI['vs']} Дуель (+{settings.POINTS_FOR_DUEL_WIN})", callback_data="start_duel"),
+            InlineKeyboardButton(text=f"{EMOJI['vs']} Дуель (+{POINTS_FOR_DUEL_WIN})", callback_data="start_duel"),
             InlineKeyboardButton(text=f"{EMOJI['help']} Допомога", callback_data="show_help")
         ]
     ])
 
 async def cmd_help(message: Message):
-    """Команда /help"""
+    """Команда /help (✅ ВИПРАВЛЕНО)"""
     help_text = (
         f"{EMOJI['help']} <b>ДОВІДКА ПО БОТУ</b>\n\n"
         f"{EMOJI['brain']} <b>ОСНОВНІ КОМАНДИ:</b>\n"
         f"• /meme - отримати випадковий мем (+1 бал)\n"
         f"• /anekdot - отримати український анекдот (+1 бал)\n"
-        f"• /submit - надіслати свій мем або анекдот (+{settings.POINTS_FOR_SUBMISSION} балів)\n"
+        f"• /submit - надіслати свій мем або анекдот (+{POINTS_FOR_SUBMISSION} балів)\n"
         f"• /daily - підписатися на щоденну розсилку\n\n"
         f"{EMOJI['fire']} <b>ГЕЙМІФІКАЦІЯ:</b>\n"
         f"• /profile - переглянути свій профіль та бали\n"
@@ -119,10 +131,10 @@ async def cmd_help(message: Message):
         f"• /duel - започаткувати дуель жартів\n\n"
         f"{EMOJI['star']} <b>СИСТЕМА БАЛІВ:</b>\n"
         f"• +1 бал - за перегляд контенту\n"
-        f"• +{settings.POINTS_FOR_REACTION} балів - за лайк мему/анекдоту\n"
-        f"• +{settings.POINTS_FOR_SUBMISSION} балів - за надісланий жарт\n"
-        f"• +{settings.POINTS_FOR_APPROVAL} балів - якщо жарт схвалено\n"
-        f"• +{settings.POINTS_FOR_DUEL_WIN} балів - за перемогу в дуелі\n"
+        f"• +{POINTS_FOR_REACTION} балів - за лайк мему/анекдоту\n"
+        f"• +{POINTS_FOR_SUBMISSION} балів - за надісланий жарт\n"
+        f"• +{POINTS_FOR_APPROVAL} балів - якщо жарт схвалено\n"
+        f"• +{POINTS_FOR_DUEL_WIN} балів - за перемогу в дуелі\n"
         f"• +1 бал автору - за кожен лайк його контенту (макс 10/день)\n\n"
         f"{EMOJI['crown']} <b>РАНГИ:</b>\n"
         f"🤡 Новачок → 😄 Сміхун → 😂 Гуморист → 🎭 Комік\n"
@@ -225,7 +237,7 @@ async def callback_toggle_daily(callback_query: CallbackQuery):
     await callback_query.answer()
 
 async def callback_submit_content(callback_query: CallbackQuery):
-    """Callback для початку подачі контенту"""
+    """Callback для початку подачі контенту (✅ ВИПРАВЛЕНО)"""
     await callback_query.message.answer(
         f"{EMOJI['fire']} <b>Як надіслати свій контент:</b>\n\n"
         f"{EMOJI['brain']} <b>Для анекдоту:</b>\n"
@@ -235,8 +247,8 @@ async def callback_submit_content(callback_query: CallbackQuery):
         f"{EMOJI['star']} <b>Приклад:</b>\n"
         f"<code>/submit Чому програмісти п'ють каву? Бо без неї код не компілюється! {EMOJI['brain']}</code>\n\n"
         f"💰 <b>Нагороди:</b>\n"
-        f"• +{settings.POINTS_FOR_SUBMISSION} балів за подачу\n"
-        f"• +{settings.POINTS_FOR_APPROVAL} балів за схвалення\n"
+        f"• +{POINTS_FOR_SUBMISSION} балів за подачу\n"
+        f"• +{POINTS_FOR_APPROVAL} балів за схвалення\n"
         f"• +1 бал за кожен лайк від інших користувачів!"
     )
     await callback_query.answer()
