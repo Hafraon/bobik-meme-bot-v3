@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-рџ§ рџ‚рџ”Ґ РЈРєСЂР°С—РЅРѕРјРѕРІРЅРёР№ Telegram-Р±РѕС‚ Р· РіРµР№РјС–С„С–РєР°С†С–С”СЋ рџ§ рџ‚рџ”Ґ
-РџРѕРІРЅР° РІРµСЂСЃС–СЏ Р· РјРµРјР°РјРё, Р°РЅРµРєРґРѕС‚Р°РјРё, Р±Р°Р»Р°РјРё, СЂР°РЅРіР°РјРё, РґСѓРµР»СЏРјРё С‚Р° РјРѕРґРµСЂР°С†С–С”СЋ
+?????? ОСНОВНИЙ МОДУЛЬ УКРАЇНОМОВНОГО TELEGRAM-БОТА ??????
+
+РОЗТАШУВАННЯ: ukrainian-telegram-bot/app/main.py
+ЗАПУСК ЧЕРЕЗ: ukrainian-telegram-bot/main.py
+
+АРХІТЕКТУРА:
+? Модульна структура з app/
+? Правильні імпорти з відносними шляхами
+? Безпечна ініціалізація всіх компонентів
+? Професійна обробка помилок
+? Graceful shutdown
+? Railway-сумісність
 """
 
 import asyncio
@@ -12,455 +22,330 @@ import os
 import signal
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
+import traceback
 
-# Р”РѕРґР°РІР°РЅРЅСЏ РїРѕС‚РѕС‡РЅРѕС— РґРёСЂРµРєС‚РѕСЂС–С— РґРѕ Python path
-sys.path.insert(0, str(Path(__file__).parent))
+# Налаштування логування для app/ модуля
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        # Логи тільки в development (не на Railway)
+        *([] if os.getenv('RAILWAY_ENVIRONMENT') else [
+            logging.FileHandler(Path(__file__).parent.parent / 'logs' / 'bot.log', encoding='utf-8')
+        ])
+    ]
+)
 
-# Aiogram imports Р· РїС–РґС‚СЂРёРјРєРѕСЋ СЂС–Р·РЅРёС… РІРµСЂСЃС–Р№
+logger = logging.getLogger(__name__)
+
+# Aiogram imports з обробкою помилок
 try:
     from aiogram import Bot, Dispatcher
     from aiogram.enums import ParseMode
     from aiogram.client.default import DefaultBotProperties
-    from aiogram.client.session.aiohttp import AiohttpSession
+    from aiogram.exceptions import TelegramNetworkError, TelegramBadRequest
+    AIOGRAM_AVAILABLE = True
 except ImportError as e:
-    print(f"вќЊ РџРѕРјРёР»РєР° С–РјРїРѕСЂС‚Сѓ aiogram: {e}")
-    print("рџ“¦ Р’СЃС‚Р°РЅРѕРІС–С‚СЊ: pip install aiogram>=3.4.0")
-    sys.exit(1)
+    logger.error(f"? Помилка імпорту aiogram: {e}")
+    logger.error("?? Встановіть: pip install aiogram>=3.4.0")
+    AIOGRAM_AVAILABLE = False
 
-# РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ Р· fallback РјРµС…Р°РЅС–Р·РјР°РјРё
-settings = None
-EMOJI = {}
-
-def load_settings():
-    """Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ РЅР°Р»Р°С€С‚СѓРІР°РЅСЊ Р· СЂС–Р·РЅРёС… РјРѕР¶Р»РёРІРёС… РґР¶РµСЂРµР»"""
-    global settings, EMOJI
-    
-    # РЎРїСЂРѕР±Р° 1: РќРѕРІР° СЃС‚СЂСѓРєС‚СѓСЂР° config/settings.py
-    try:
-        from config.settings import Settings
-        settings = Settings()
-        
-        # Р”РѕРґР°С”РјРѕ РЅРµРґРѕСЃС‚Р°С‚РЅС– Р°С‚СЂРёР±СѓС‚Рё СЏРєС‰Рѕ С—С… РЅРµРјР°С”
-        if not hasattr(settings, 'ADMIN_ID'):
-            settings.ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-        if not hasattr(settings, 'DATABASE_URL'):
-            settings.DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///ukrainian_bot.db")
-        if not hasattr(settings, 'DEBUG'):
-            settings.DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-        
-        print("вњ… Р—Р°РІР°РЅС‚Р°Р¶РµРЅРѕ РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ Р· config.settings")
-        
-    except ImportError:
-        # РЎРїСЂРѕР±Р° 2: РЎС‚Р°СЂРёР№ РІР°СЂС–Р°РЅС‚ settings.py
-        try:
-            from settings import settings as old_settings, EMOJI as old_emoji
-            settings = old_settings
-            EMOJI = old_emoji
-            print("вњ… Р—Р°РІР°РЅС‚Р°Р¶РµРЅРѕ РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ Р· settings.py")
-        except ImportError:
-            # РЎРїСЂРѕР±Р° 3: Fallback РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ
-            print("вљ пёЏ Р’РёРєРѕСЂРёСЃС‚РѕРІСѓСЋ fallback РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ")
-            
-            class FallbackSettings:
-                def __init__(self):
-                    self.BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-                    self.ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-                    self.DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///ukrainian_bot.db")
-                    self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-                    self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-                    self.DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-                    self.CHANNEL_ID = os.getenv("CHANNEL_ID", "")
-                    
-                    # Р“РµР№РјС–С„С–РєР°С†С–СЏ
-                    self.POINTS_FOR_REACTION = int(os.getenv("POINTS_FOR_REACTION", "5"))
-                    self.POINTS_FOR_SUBMISSION = int(os.getenv("POINTS_FOR_SUBMISSION", "10"))
-                    self.POINTS_FOR_APPROVAL = int(os.getenv("POINTS_FOR_APPROVAL", "20"))
-                    self.POINTS_FOR_TOP_JOKE = int(os.getenv("POINTS_FOR_TOP_JOKE", "50"))
-                    self.POINTS_FOR_DUEL_WIN = int(os.getenv("POINTS_FOR_DUEL_WIN", "15"))
-                    self.POINTS_FOR_DAILY_ACTIVITY = int(os.getenv("POINTS_FOR_DAILY_ACTIVITY", "2"))
-                    
-                    # РћР±РјРµР¶РµРЅРЅСЏ
-                    self.MAX_JOKE_LENGTH = int(os.getenv("MAX_JOKE_LENGTH", "1000"))
-                    self.MAX_MEME_CAPTION_LENGTH = int(os.getenv("MAX_MEME_CAPTION_LENGTH", "200"))
-                    
-                    # Р”СѓРµР»С–
-                    self.DUEL_VOTING_TIME = int(os.getenv("DUEL_VOTING_TIME", "300"))
-                    self.MIN_VOTES_FOR_DUEL = int(os.getenv("MIN_VOTES_FOR_DUEL", "3"))
-                    
-                    # Р©РѕРґРµРЅРЅР° СЂРѕР·СЃРёР»РєР°
-                    self.DAILY_BROADCAST_HOUR = int(os.getenv("DAILY_BROADCAST_HOUR", "9"))
-                    self.DAILY_BROADCAST_MINUTE = int(os.getenv("DAILY_BROADCAST_MINUTE", "0"))
-            
-            settings = FallbackSettings()
-    
-    # Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ EMOJI СЏРєС‰Рѕ РЅРµ Р·Р°РІР°РЅС‚Р°Р¶РµРЅРѕ
-    if not EMOJI:
-        EMOJI = {
-            "brain": "рџ§ ", "laugh": "рџ‚", "fire": "рџ”Ґ", "star": "в­ђ", 
-            "heart": "вќ¤пёЏ", "trophy": "рџЏ†", "crown": "рџ‘‘", "rocket": "рџљЂ",
-            "party": "рџЋ‰", "boom": "рџ’Ґ", "like": "рџ‘Ќ", "dislike": "рџ‘Ћ",
-            "thinking": "рџ¤”", "cool": "рџЋ", "wink": "рџ‰", "eye": "рџ‘ЃпёЏ",
-            "check": "вњ…", "cross": "вќЊ", "warning": "вљ пёЏ", "info": "в„№пёЏ",
-            "new": "рџ†•", "top": "рџ”ќ", "vs": "вљ”пёЏ", "time": "вЏ°",
-            "calendar": "рџ“…", "stats": "рџ“Љ", "profile": "рџ‘¤", "help": "вќ“"
-        }
-
-# РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ Р»РѕРіСѓРІР°РЅРЅСЏ
-def setup_logging():
-    """РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ СЃРёСЃС‚РµРјРё Р»РѕРіСѓРІР°РЅРЅСЏ"""
-    
-    # РЎС‚РІРѕСЂРµРЅРЅСЏ РґРёСЂРµРєС‚РѕСЂС–С— РґР»СЏ Р»РѕРіС–РІ
-    os.makedirs('logs', exist_ok=True)
-    
-    # Р С–РІРµРЅСЊ Р»РѕРіСѓРІР°РЅРЅСЏ
-    log_level = getattr(logging, getattr(settings, 'LOG_LEVEL', 'INFO'), logging.INFO)
-    
-    # РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ С„РѕСЂРјР°С‚СѓРІР°РЅРЅСЏ
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    # РљРѕРЅСЃРѕР»СЊРЅРёР№ handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    
-    # Р¤Р°Р№Р»РѕРІРёР№ handler
-    file_handler = logging.FileHandler('logs/bot.log', encoding='utf-8')
-    file_handler.setFormatter(formatter)
-    
-    # РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
-    root_logger.addHandler(console_handler)
-    root_logger.addHandler(file_handler)
-    
-    # Р—РјРµРЅС€РµРЅРЅСЏ СЂС–РІРЅСЏ Р»РѕРіСѓРІР°РЅРЅСЏ РґР»СЏ Р·РѕРІРЅС–С€РЅС–С… Р±С–Р±Р»С–РѕС‚РµРє
-    logging.getLogger("aiogram").setLevel(logging.WARNING)
-    logging.getLogger("aiohttp").setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
-
-class UkrainianBot:
-    """РћСЃРЅРѕРІРЅРёР№ РєР»Р°СЃ СѓРєСЂР°С—РЅРѕРјРѕРІРЅРѕРіРѕ Р±РѕС‚Р°"""
+class UkrainianTelegramBot:
+    """?? ВИПРАВЛЕНИЙ клас україномовного Telegram-бота"""
     
     def __init__(self):
-        self.bot = None
-        self.dp = None
-        self.scheduler = None
-        self._shutdown_event = asyncio.Event()
+        self.bot: Optional[Bot] = None
+        self.dp: Optional[Dispatcher] = None
+        self.scheduler_service = None
+        self.is_running = False
+        self.startup_time = datetime.now()
+        self.health_server = None
+        
+        # Обробка сигналів для коректного завершення
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
     
-    async def validate_environment(self):
-        """Р’Р°Р»С–РґР°С†С–СЏ РѕС‚РѕС‡РµРЅРЅСЏ С‚Р° РЅР°Р»Р°С€С‚СѓРІР°РЅСЊ"""
-        logger.info("рџ”Ќ РџРµСЂРµРІС–СЂРєР° РЅР°Р»Р°С€С‚СѓРІР°РЅСЊ...")
-        
-        errors = []
-        
-        # РџРµСЂРµРІС–СЂРєР° РѕР±РѕРІ'СЏР·РєРѕРІРёС… Р·РјС–РЅРЅРёС…
-        if not settings.BOT_TOKEN:
-            errors.append("BOT_TOKEN РЅРµ РЅР°Р»Р°С€С‚РѕРІР°РЅРѕ")
-        
-        if not settings.ADMIN_ID:
-            errors.append("ADMIN_ID РЅРµ РЅР°Р»Р°С€С‚РѕРІР°РЅРѕ")
-        
-        # РџРµСЂРµРІС–СЂРєР° СЃС‚СЂСѓРєС‚СѓСЂРё С„Р°Р№Р»С–РІ
-        required_dirs = ['handlers', 'database', 'config']
-        for dir_name in required_dirs:
-            if not os.path.exists(dir_name):
-                errors.append(f"РџР°РїРєР° '{dir_name}' РЅРµ Р·РЅР°Р№РґРµРЅР°")
-        
-        if errors:
-            logger.error("вќЊ РџРѕРјРёР»РєРё РєРѕРЅС„С–РіСѓСЂР°С†С–С—:")
-            for error in errors:
-                logger.error(f"  - {error}")
+    def _signal_handler(self, signum, frame):
+        """Обробка сигналів завершення"""
+        logger.info(f"?? Отримано сигнал {signum}")
+        self.is_running = False
+    
+    def print_banner(self):
+        """Красивий банер запуску"""
+        print("\n" + "??????" * 20)
+        print("?? ПРОФЕСІЙНИЙ УКРАЇНОМОВНИЙ TELEGRAM-БОТ v2.0 ??")
+        print("???? ВИПРАВЛЕНА ВЕРСІЯ З PROPER ASYNC/AWAIT ????")
+        print("??????" * 20 + "\n")
+    
+    def load_settings(self) -> dict:
+        """Завантаження налаштувань з обробкою помилок для app/ структури"""
+        try:
+            # Спроба імпорту з відносним шляхом
+            from config.settings import settings
+            return {
+                'bot_token': settings.BOT_TOKEN,
+                'admin_id': settings.ADMIN_ID,
+                'database_url': getattr(settings, 'DATABASE_URL', 'sqlite:///bot.db'),
+                'debug': getattr(settings, 'DEBUG', False),
+                'timezone': getattr(settings, 'TIMEZONE', 'Europe/Kiev')
+            }
+        except ImportError:
+            logger.warning("?? Не вдалося імпортувати config.settings з app/, використовую env")
+            return {
+                'bot_token': os.getenv('BOT_TOKEN'),
+                'admin_id': int(os.getenv('ADMIN_ID', 0)),
+                'database_url': os.getenv('DATABASE_URL', 'sqlite:///ukrainian_bot.db'),
+                'debug': os.getenv('DEBUG', 'False').lower() == 'true',
+                'timezone': os.getenv('TIMEZONE', 'Europe/Kiev')
+            }
+    
+    def validate_settings(self, settings: dict) -> bool:
+        """Валідація налаштувань"""
+        if not settings.get('bot_token'):
+            logger.error("? BOT_TOKEN не встановлено!")
             return False
         
-        logger.info("вњ… РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ РІР°Р»С–РґРЅС–")
+        if not settings.get('admin_id'):
+            logger.error("? ADMIN_ID не встановлено!")
+            return False
+        
+        logger.info("? Налаштування валідні")
         return True
     
-    async def create_bot(self):
-        """РЎС‚РІРѕСЂРµРЅРЅСЏ Р±РѕС‚Р° Р· РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏРјРё"""
+    async def init_database(self) -> bool:
+        """Безпечна ініціалізація БД з урахуванням app/ структури"""
         try:
-            # РЎС‚РІРѕСЂРµРЅРЅСЏ СЃРµСЃС–С—
-            session = AiohttpSession()
-            
-            # РЎС‚РІРѕСЂРµРЅРЅСЏ Р±РѕС‚Р°
-            self.bot = Bot(
-                token=settings.BOT_TOKEN,
-                session=session,
-                default=DefaultBotProperties(
-                    parse_mode=ParseMode.HTML,
-                    link_preview_is_disabled=True
-                )
-            )
-            
-            # РџРµСЂРµРІС–СЂРєР° РїС–РґРєР»СЋС‡РµРЅРЅСЏ
-            bot_info = await self.bot.get_me()
-            logger.info(f"рџ¤– Р‘РѕС‚ РїС–РґРєР»СЋС‡РµРЅРёР№: @{bot_info.username} ({bot_info.first_name})")
-            return True
-            
-        except Exception as e:
-            logger.error(f"вќЊ РџРѕРјРёР»РєР° СЃС‚РІРѕСЂРµРЅРЅСЏ Р±РѕС‚Р°: {e}")
-            return False
-    
-    async def setup_database(self):
-        """Р†РЅС–С†С–Р°Р»С–Р·Р°С†С–СЏ Р±Р°Р·Рё РґР°РЅРёС…"""
-        try:
-            # РЎРїСЂРѕР±Р° С–РјРїРѕСЂС‚Сѓ database РјРѕРґСѓР»СЏ
-            try:
-                from database.database import init_db
-                await init_db()
-                logger.info("рџ’ѕ Р‘Р°Р·Р° РґР°РЅРёС… С–РЅС–С†С–Р°Р»С–Р·РѕРІР°РЅР°")
-                return True
-            except ImportError:
-                logger.warning("вљ пёЏ РњРѕРґСѓР»СЊ database.database РЅРµ Р·РЅР°Р№РґРµРЅРѕ, РїСЂРѕРїСѓСЃРєР°СЋ С–РЅС–С†С–Р°Р»С–Р·Р°С†С–СЋ Р‘Р”")
-                return True
-        except Exception as e:
-            logger.error(f"вќЊ РџРѕРјРёР»РєР° С–РЅС–С†С–Р°Р»С–Р·Р°С†С–С— Р‘Р”: {e}")
-            return False
-    
-    async def setup_dispatcher(self):
-        """РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ РґРёСЃРїРµС‚С‡РµСЂР° С‚Р° С…РµРЅРґР»РµСЂС–РІ"""
-        try:
-            self.dp = Dispatcher()
-            
-            # Р РµС”СЃС‚СЂР°С†С–СЏ middleware (СЏРєС‰Рѕ С”)
-            try:
-                from middlewares.auth import AuthMiddleware, AntiSpamMiddleware, LoggingMiddleware
-                
-                self.dp.message.middleware(LoggingMiddleware())
-                self.dp.callback_query.middleware(LoggingMiddleware())
-                
-                self.dp.message.middleware(AntiSpamMiddleware(rate_limit=3))
-                self.dp.callback_query.middleware(AntiSpamMiddleware(rate_limit=5))
-                
-                self.dp.message.middleware(AuthMiddleware())
-                self.dp.callback_query.middleware(AuthMiddleware())
-                
-                logger.info("рџ”§ Middleware РїС–РґРєР»СЋС‡РµРЅРѕ")
-            except ImportError:
-                logger.warning("вљ пёЏ Middleware РЅРµ Р·РЅР°Р№РґРµРЅРѕ, РїСЂР°С†СЋСЋ Р±РµР· РЅРёС…")
-            
-            # Р РµС”СЃС‚СЂР°С†С–СЏ С…РµРЅРґР»РµСЂС–РІ
-            try:
-                from handlers import register_handlers
-                register_handlers(self.dp)
-                logger.info("рџЋЇ РҐРµРЅРґР»РµСЂРё Р·Р°СЂРµС”СЃС‚СЂРѕРІР°РЅС–")
-                return True
-            except ImportError:
-                logger.error("вќЊ РќРµ РІРґР°Р»РѕСЃСЏ Р·Р°РІР°РЅС‚Р°Р¶РёС‚Рё С…РµРЅРґР»РµСЂРё")
-                # РЎРїСЂРѕР±Р° fallback СЂРµС”СЃС‚СЂР°С†С–С—
-                return await self.setup_fallback_handlers()
-                
-        except Exception as e:
-            logger.error(f"вќЊ РџРѕРјРёР»РєР° РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ РґРёСЃРїРµС‚С‡РµСЂР°: {e}")
-            return False
-    
-    async def setup_fallback_handlers(self):
-        """Fallback СЂРµС”СЃС‚СЂР°С†С–СЏ Р±Р°Р·РѕРІРёС… С…РµРЅРґР»РµСЂС–РІ"""
-        try:
-            from aiogram.filters import Command
-            
-            # Р‘Р°Р·РѕРІРёР№ /start С…РµРЅРґР»РµСЂ
-            @self.dp.message(Command("start"))
-            async def cmd_start(message):
-                await message.answer(
-                    f"{EMOJI.get('fire', 'рџ”Ґ')} <b>Р’С–С‚Р°СЋ!</b>\n\n"
-                    f"Р‘РѕС‚ Р·Р°РїСѓС‰РµРЅРѕ Сѓ fallback СЂРµР¶РёРјС–.\n"
-                    f"Р”РѕРґР°Р№С‚Рµ С…РµРЅРґР»РµСЂРё РґР»СЏ РїРѕРІРЅРѕС— С„СѓРЅРєС†С–РѕРЅР°Р»СЊРЅРѕСЃС‚С–."
-                )
-            
-            logger.info("рџ”„ Fallback С…РµРЅРґР»РµСЂРё Р·Р°СЂРµС”СЃС‚СЂРѕРІР°РЅС–")
-            return True
-            
-        except Exception as e:
-            logger.error(f"вќЊ РџРѕРјРёР»РєР° fallback С…РµРЅРґР»РµСЂС–РІ: {e}")
-            return False
-    
-    async def setup_scheduler(self):
-        """РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ РїР»Р°РЅСѓРІР°Р»СЊРЅРёРєР° (РѕРїС†С–РѕРЅР°Р»СЊРЅРѕ)"""
-        try:
-            from services.scheduler import SchedulerService
-            self.scheduler = SchedulerService(self.bot)
-            await self.scheduler.start()
-            logger.info("вЏ° РџР»Р°РЅСѓРІР°Р»СЊРЅРёРє Р·Р°РїСѓС‰РµРЅРѕ")
+            # Спроба імпорту з app/database
+            from database import init_db
+            await init_db()
+            logger.info("? База даних ініціалізована")
             return True
         except ImportError:
-            logger.info("в„№пёЏ РџР»Р°РЅСѓРІР°Р»СЊРЅРёРє РЅРµ Р·РЅР°Р№РґРµРЅРѕ, РїСЂР°С†СЋСЋ Р±РµР· Р°РІС‚РѕРјР°С‚РёС‡РЅРёС… Р·Р°РґР°С‡")
+            logger.warning("?? Модуль database недоступний з app/, працюю без БД")
             return True
         except Exception as e:
-            logger.error(f"вќЊ РџРѕРјРёР»РєР° РїР»Р°РЅСѓРІР°Р»СЊРЅРёРєР°: {e}")
-            return True  # РќРµ РєСЂРёС‚РёС‡РЅР° РїРѕРјРёР»РєР°
+            logger.error(f"? Помилка ініціалізації БД: {e}")
+            return False
     
-    async def notify_admin_startup(self):
-        """РџРѕРІС–РґРѕРјР»РµРЅРЅСЏ Р°РґРјС–РЅС–СЃС‚СЂР°С‚РѕСЂСѓ РїСЂРѕ Р·Р°РїСѓСЃРє"""
-        if not self.bot or not settings.ADMIN_ID:
-            return
-        
+    async def create_bot(self, settings: dict) -> bool:
+        """Створення бота"""
         try:
-            startup_message = (
-                f"{EMOJI.get('rocket', 'рџљЂ')} <b>Р‘РћРў Р—РђРџРЈР©Р•РќРћ!</b>\n\n"
-                f"{EMOJI.get('check', 'вњ…')} Р’СЃС– СЃРёСЃС‚РµРјРё РїСЂР°С†СЋСЋС‚СЊ\n"
-                f"{EMOJI.get('brain', 'рџ§ ')} Р“РµР№РјС–С„С–РєР°С†С–СЏ Р°РєС‚РёРІРЅР°\n"
-                f"{EMOJI.get('fire', 'рџ”Ґ')} РњРѕРґРµСЂР°С†С–СЏ РЅР°Р»Р°С€С‚РѕРІР°РЅР°\n"
-                f"{EMOJI.get('vs', 'вљ”пёЏ')} Р”СѓРµР»С– РіРѕС‚РѕРІС–\n\n"
-                f"{EMOJI.get('calendar', 'рџ“…')} Р§Р°СЃ Р·Р°РїСѓСЃРєСѓ: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
-            )
+            if not AIOGRAM_AVAILABLE:
+                logger.error("? aiogram недоступний")
+                return False
             
-            await self.bot.send_message(settings.ADMIN_ID, startup_message)
-            logger.info("рџ“¤ РџРѕРІС–РґРѕРјР»РµРЅРЅСЏ Р°РґРјС–РЅС–СЃС‚СЂР°С‚РѕСЂСѓ РЅР°РґС–СЃР»Р°РЅРѕ")
-            
-        except Exception as e:
-            logger.error(f"РќРµ РІРґР°Р»РѕСЃСЏ РїРѕРІС–РґРѕРјРёС‚Рё Р°РґРјС–РЅС–СЃС‚СЂР°С‚РѕСЂР°: {e}")
-    
-    async def start_polling(self):
-        """Р—Р°РїСѓСЃРє Р±РѕС‚Р° РІ СЂРµР¶РёРјС– polling"""
-        try:
-            logger.info("рџљЂ Р—Р°РїСѓСЃРє Р±РѕС‚Р° РІ СЂРµР¶РёРјС– polling...")
-            
-            # Р’С–РґРїСЂР°РІРєР° РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ Р°РґРјС–РЅС–СЃС‚СЂР°С‚РѕСЂСѓ
-            await self.notify_admin_startup()
-            
-            # РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ graceful shutdown
-            def signal_handler(signum, frame):
-                logger.info(f"рџ“¶ РћС‚СЂРёРјР°РЅРѕ СЃРёРіРЅР°Р» {signum}")
-                self._shutdown_event.set()
-            
-            signal.signal(signal.SIGINT, signal_handler)
-            signal.signal(signal.SIGTERM, signal_handler)
-            
-            # Р—Р°РїСѓСЃРє polling Р· graceful shutdown
-            polling_task = asyncio.create_task(
-                self.dp.start_polling(
-                    self.bot,
-                    skip_updates=True,
-                    allowed_updates=["message", "callback_query", "inline_query"]
+            self.bot = Bot(
+                token=settings['bot_token'],
+                default=DefaultBotProperties(
+                    parse_mode=ParseMode.HTML
                 )
             )
             
-            shutdown_task = asyncio.create_task(self._shutdown_event.wait())
+            self.dp = Dispatcher()
             
-            # РћС‡С–РєСѓРІР°РЅРЅСЏ Р·Р°РІРµСЂС€РµРЅРЅСЏ
-            done, pending = await asyncio.wait(
-                [polling_task, shutdown_task],
-                return_when=asyncio.FIRST_COMPLETED
-            )
-            
-            # РЎРєР°СЃСѓРІР°РЅРЅСЏ РЅРµРІРёРєРѕРЅР°РЅРёС… Р·Р°РґР°С‡
-            for task in pending:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+            # Тест з'єднання
+            bot_info = await self.bot.get_me()
+            logger.info(f"? Бот створено: @{bot_info.username}")
+            return True
             
         except Exception as e:
-            logger.error(f"вќЊ РџРѕРјРёР»РєР° РїС–Рґ С‡Р°СЃ СЂРѕР±РѕС‚Рё Р±РѕС‚Р°: {e}")
+            logger.error(f"? Помилка створення бота: {e}")
+            return False
+    
+    async def setup_dispatcher(self) -> bool:
+        """Налаштування диспетчера"""
+        try:
+            # Реєстрація базових команд
+            from aiogram.filters import Command
+            from aiogram.types import Message
+            
+            @self.dp.message(Command("start"))
+            async def cmd_start(message: Message):
+                await message.answer("?????? Бот працює в тестовому режимі!")
+            
+            @self.dp.message(Command("status"))
+            async def cmd_status(message: Message):
+                uptime = datetime.now() - self.startup_time
+                await message.answer(f"? Статус: Працює\n? Час роботи: {uptime}")
+            
+            # Спроба реєстрації всіх хендлерів з app/handlers
+            try:
+                from handlers import register_all_handlers
+                register_all_handlers(self.dp)
+                logger.info("? Всі хендлери зареєстровано з app/handlers")
+            except ImportError:
+                logger.warning("?? app/handlers недоступні, працюю з базовими командами")
+            except Exception as e:
+                logger.warning(f"?? Помилка реєстрації хендлерів: {e}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"? Помилка налаштування диспетчера: {e}")
+            return False
+    
+    async def setup_scheduler(self, settings: dict):
+        """Налаштування планувальника з app/services"""
+        try:
+            from services.scheduler import SchedulerService
+            self.scheduler_service = SchedulerService(self.bot)
+            await self.scheduler_service.start()
+            logger.info("? Планувальник запущено з app/services")
+        except ImportError:
+            logger.warning("?? app/services/scheduler недоступний")
+        except Exception as e:
+            logger.error(f"? Помилка планувальника: {e}")
+    
+    async def startup_checks(self, settings: dict):
+        """Перевірки при запуску"""
+        try:
+            # Повідомлення адміністратору про запуск
+            if settings.get('admin_id') and self.bot:
+                await self.bot.send_message(
+                    settings['admin_id'],
+                    "? <b>БОТ УСПІШНО ЗАПУЩЕНО</b>\n\n"
+                    f"?? Час запуску: {self.startup_time.strftime('%H:%M:%S')}\n"
+                    f"?? Версія: 2.0 (Виправлена)\n"
+                    f"?? Середовище: {'Production' if os.getenv('RAILWAY_ENVIRONMENT') else 'Development'}"
+                )
+        except Exception as e:
+            logger.warning(f"?? Не вдалося надіслати повідомлення адміну: {e}")
+    
+    async def run_bot(self):
+        """Запуск основного циклу бота"""
+        try:
+            self.is_running = True
+            logger.info("?? Початок polling...")
+            
+            await self.dp.start_polling(
+                self.bot,
+                skip_updates=True,
+                allowed_updates=["message", "callback_query", "inline_query"]
+            )
+            
+        except Exception as e:
+            logger.error(f"? Помилка polling: {e}")
             raise
         finally:
             await self.shutdown()
     
     async def shutdown(self):
-        """РљРѕСЂРµРєС‚РЅРµ Р·Р°РІРµСЂС€РµРЅРЅСЏ СЂРѕР±РѕС‚Рё Р±РѕС‚Р°"""
-        logger.info("рџ”„ Р—Р°РІРµСЂС€РµРЅРЅСЏ СЂРѕР±РѕС‚Рё Р±РѕС‚Р°...")
-        
+        """Коректне завершення роботи"""
         try:
-            # РџРѕРІС–РґРѕРјР»РµРЅРЅСЏ Р°РґРјС–РЅС–СЃС‚СЂР°С‚РѕСЂСѓ
-            if self.bot and settings.ADMIN_ID:
+            logger.info("?? Початок процедури завершення...")
+            
+            # Повідомлення адміністратору
+            if self.bot:
                 try:
-                    await self.bot.send_message(
-                        settings.ADMIN_ID,
-                        f"{EMOJI.get('cross', 'вќЊ')} <b>Р‘РћРў Р—РЈРџРРќР•РќРћ</b>\n\n"
-                        f"{EMOJI.get('time', 'вЏ°')} Р§Р°СЃ Р·СѓРїРёРЅРєРё: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+                    from config.settings import settings
+                    uptime = datetime.now() - self.startup_time
+                    shutdown_message = (
+                        "?? <b>БОТ ЗУПИНЕНО</b>\n\n"
+                        f"? Час роботи: {uptime}\n"
+                        f"?? Статус: Коректне завершення"
                     )
-                except:
+                    await self.bot.send_message(settings.ADMIN_ID, shutdown_message)
+                except ImportError:
+                    logger.warning("?? Не вдалося імпортувати налаштування для повідомлення адміну")
+                except Exception:
                     pass
             
-            # Р—СѓРїРёРЅРєР° РїР»Р°РЅСѓРІР°Р»СЊРЅРёРєР°
-            if self.scheduler:
-                await self.scheduler.stop()
-                logger.info("вЏ° РџР»Р°РЅСѓРІР°Р»СЊРЅРёРє Р·СѓРїРёРЅРµРЅРѕ")
+            # Зупинка планувальника
+            if self.scheduler_service:
+                await self.scheduler_service.stop()
+                logger.info("? Планувальник зупинено")
             
-            # Р—Р°РєСЂРёС‚С‚СЏ СЃРµСЃС–С— Р±РѕС‚Р°
+            # Закриття сесії бота
             if self.bot:
                 await self.bot.session.close()
-                logger.info("рџ¤– РЎРµСЃС–СЏ Р±РѕС‚Р° Р·Р°РєСЂРёС‚Р°")
-        
+                logger.info("?? Сесія бота закрита")
+            
+            uptime = datetime.now() - self.startup_time
+            logger.info(f"?? Час роботи: {uptime}")
+            logger.info("?? Бот зупинено коректно")
+            
         except Exception as e:
-            logger.error(f"вќЊ РџРѕРјРёР»РєР° РїСЂРё Р·Р°РІРµСЂС€РµРЅРЅС–: {e}")
+            logger.error(f"? Помилка при завершенні: {e}")
     
-    async def run(self):
-        """РћСЃРЅРѕРІРЅРёР№ РјРµС‚РѕРґ Р·Р°РїСѓСЃРєСѓ Р±РѕС‚Р°"""
-        logger.info(f"{EMOJI.get('rocket', 'рџљЂ')} Р—Р°РїСѓСЃРє СѓРєСЂР°С—РЅРѕРјРѕРІРЅРѕРіРѕ Telegram-Р±РѕС‚Р°")
+    async def main(self):
+        """?? ВИПРАВЛЕНА головна функція запуску"""
+        self.print_banner()
         
-        # РџРѕСЃР»С–РґРѕРІРЅР° С–РЅС–С†С–Р°Р»С–Р·Р°С†С–СЏ РєРѕРјРїРѕРЅРµРЅС‚С–РІ
-        steps = [
-            ("рџ”Ќ Р’Р°Р»С–РґР°С†С–СЏ РѕС‚РѕС‡РµРЅРЅСЏ", self.validate_environment),
-            ("рџ¤– РЎС‚РІРѕСЂРµРЅРЅСЏ Р±РѕС‚Р°", self.create_bot),
-            ("рџ’ѕ Р†РЅС–С†С–Р°Р»С–Р·Р°С†С–СЏ Р‘Р”", self.setup_database),
-            ("рџ”§ РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ РґРёСЃРїРµС‚С‡РµСЂР°", self.setup_dispatcher),
-            ("вЏ° Р—Р°РїСѓСЃРє РїР»Р°РЅСѓРІР°Р»СЊРЅРёРєР°", self.setup_scheduler),
-        ]
-        
-        for step_name, step_func in steps:
-            logger.info(f"в–¶пёЏ {step_name}...")
-            try:
-                result = await step_func()
-                if result is False:
-                    logger.error(f"вќЊ РќРµРІРґР°Р»РёР№ РєСЂРѕРє: {step_name}")
-                    return False
-            except Exception as e:
-                logger.error(f"вќЊ РџРѕРјРёР»РєР° РІ РєСЂРѕС†С– '{step_name}': {e}")
+        try:
+            # Крок 1: Завантаження налаштувань
+            logger.info("?? ?? Завантаження налаштувань...")
+            settings = self.load_settings()
+            
+            if not self.validate_settings(settings):
+                logger.error("? Помилка валідації налаштувань")
                 return False
-        
-        logger.info(f"{EMOJI.get('party', 'рџЋ‰')} Р’СЃС– РєРѕРјРїРѕРЅРµРЅС‚Рё С–РЅС–С†С–Р°Р»С–Р·РѕРІР°РЅРѕ!")
-        
-        # Р—Р°РїСѓСЃРє РѕСЃРЅРѕРІРЅРѕРіРѕ С†РёРєР»Сѓ
-        await self.start_polling()
-        return True
+            
+            # Крок 2: Ініціалізація БД
+            logger.info("?? ?? Ініціалізація БД...")
+            if not await self.init_database():
+                logger.error("? Критична помилка БД")
+                return False
+            
+            # Крок 3: Створення бота
+            logger.info("?? ?? Створення бота...")
+            if not await self.create_bot(settings):
+                logger.error("? Не вдалося створити бота")
+                return False
+            
+            # Крок 4: Налаштування диспетчера
+            logger.info("?? ?? Налаштування диспетчера...")
+            if not await self.setup_dispatcher():
+                logger.error("? Помилка налаштування диспетчера")
+                return False
+            
+            # Крок 5: Планувальник
+            logger.info("?? ?? Налаштування планувальника...")
+            await self.setup_scheduler(settings)
+            
+            # Крок 6: Перевірки при запуску
+            logger.info("?? ?? Перевірки при запуску...")
+            await self.startup_checks(settings)
+            
+            # Крок 7: Запуск
+            logger.info("?? ?? Запуск бота...")
+            await self.run_bot()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"?? КРИТИЧНА ПОМИЛКА: {e}")
+            logger.error(traceback.format_exc())
+            return False
 
 async def main():
-    """Р“РѕР»РѕРІРЅР° С„СѓРЅРєС†С–СЏ Р·Р°РїСѓСЃРєСѓ"""
+    """?? ВИПРАВЛЕНА точка входу в програму"""
+    bot = UkrainianTelegramBot()
     
-    # Р’С–С‚Р°Р»СЊРЅРµ РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ
-    print("рџ§ рџ‚рџ”Ґ" * 20)
-    print("рџљЂ РЈРљР РђР‡РќРћРњРћР’РќРР™ TELEGRAM-Р‘РћРў Р— Р“Р•Р™РњР†Р¤Р†РљРђР¦Р†Р„Р® рџљЂ")
-    print("рџ§ рџ‚рџ”Ґ" * 20)
-    print()
-    
-    # Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ РЅР°Р»Р°С€С‚СѓРІР°РЅСЊ
-    load_settings()
-    
-    # РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ Р»РѕРіСѓРІР°РЅРЅСЏ
-    setup_logging()
-    
-    # Р—Р°РїСѓСЃРє Р±РѕС‚Р°
-    bot = UkrainianBot()
     try:
-        success = await bot.run()
-        if not success:
-            logger.error("вќЊ Р‘РѕС‚ РЅРµ Р·РјС–Рі Р·Р°РїСѓСЃС‚РёС‚РёСЃСЏ")
-            sys.exit(1)
+        result = await bot.main()
+        return result
     except KeyboardInterrupt:
-        logger.info("рџ‘‹ Р‘РѕС‚ Р·СѓРїРёРЅРµРЅРѕ РєРѕСЂРёСЃС‚СѓРІР°С‡РµРј")
+        logger.info("?? Зупинка через Ctrl+C")
+        return True
     except Exception as e:
-        logger.error(f"вќЊ РљСЂРёС‚РёС‡РЅР° РїРѕРјРёР»РєР°: {e}")
+        logger.error(f"?? Неочікувана помилка: {e}")
+        logger.error(traceback.format_exc())
+        return False
+
+# Точка входу для синхронного виклику
+def sync_main():
+    """Синхронна обгортка для main()"""
+    try:
+        result = asyncio.run(main())
+        sys.exit(0 if result else 1)
+    except KeyboardInterrupt:
+        logger.info("?? Зупинка через Ctrl+C")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"?? Неочікувана помилка: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
-    try:
-        # РџРµСЂРµРІС–СЂРєР° РІРµСЂСЃС–С— Python
-        if sys.version_info < (3, 8):
-            print("вќЊ РџРѕС‚СЂС–Р±РµРЅ Python 3.8 Р°Р±Рѕ РЅРѕРІС–С€РёР№")
-            sys.exit(1)
-        
-        # Р—Р°РїСѓСЃРє С‡РµСЂРµР· asyncio
-        asyncio.run(main())
-        
-    except KeyboardInterrupt:
-        print("\nрџ‘‹ Р”Рѕ РїРѕР±Р°С‡РµРЅРЅСЏ!")
-    except Exception as e:
-        print(f"\nвќЊ РљСЂРёС‚РёС‡РЅР° РїРѕРјРёР»РєР° Р·Р°РїСѓСЃРєСѓ: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    sync_main()

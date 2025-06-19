@@ -1,1 +1,3 @@
-web: python app/main.py
+# 🧠😂🔥 Railway Procfile - правильний запуск бота
+release: python -c "import sys; print('🧠😂🔥 PROFESSIONAL UKRAINIAN BOT v2.0'); print('🚀 Starting release phase...'); print('✅ Release ready!')"
+web: python main.py
