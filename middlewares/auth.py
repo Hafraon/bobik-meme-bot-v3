@@ -47,8 +47,9 @@ class LoggingMiddleware(BaseMiddleware):
 class AntiSpamMiddleware(BaseMiddleware):
     """Middleware для захисту від спаму"""
     
-    def __init__(self, messages_per_second: int = 3):
-        self.messages_per_second = messages_per_second
+    def __init__(self, rate_limit: int = 3):
+        # ✅ ВИПРАВЛЕНО: параметр rate_limit для сумісності з main.py
+        self.rate_limit = rate_limit
         self.user_last_message = {}
         self.user_message_count = {}
     
@@ -75,7 +76,7 @@ class AntiSpamMiddleware(BaseMiddleware):
                     self.user_message_count[user_id] += 1
                     
                     # Перевищення ліміту
-                    if self.user_message_count[user_id] > self.messages_per_second:
+                    if self.user_message_count[user_id] > self.rate_limit:
                         logger.warning(f"🚫 Спам від користувача {user_id}")
                         
                         if isinstance(event, Message):

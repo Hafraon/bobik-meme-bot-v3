@@ -359,6 +359,80 @@ async def get_random_approved_content(content_type: str = None, user_id: int = N
 
 # ===== ДОПОМІЖНІ ФУНКЦІЇ =====
 
+# ===== ДОПОМІЖНІ ФУНКЦІЇ =====
+
+async def check_if_migration_needed() -> bool:
+    """Перевірити чи потрібна міграція БД"""
+    try:
+        if not MODELS_LOADED:
+            return False
+            
+        with get_db_session() as session:
+            # Перевірка чи існують таблиці з правильною структурою
+            try:
+                # Перевірка enum значень
+                result = session.execute(text("SELECT 1 FROM content WHERE status = 'APPROVED' LIMIT 1"))
+                return False  # Міграція не потрібна
+            except Exception:
+                return True  # Потрібна міграція
+                
+    except Exception as e:
+        logger.error(f"❌ Помилка перевірки міграції: {e}")
+        return True
+
+async def migrate_database():
+    """Виконати міграцію БД"""
+    try:
+        if not MODELS_LOADED:
+            logger.warning("⚠️ Моделі не завантажені, пропускаю міграцію")
+            return
+            
+        logger.info("🔄 Починаю міграцію БД...")
+        
+        with engine.begin() as conn:
+            # Видалення старих таблиць
+            tables = ['duel_votes', 'admin_actions', 'bot_statistics', 'ratings', 'duels', 'content', 'users']
+            for table in tables:
+                try:
+                    conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
+                    logger.info(f"🗑️ Видалено таблицю: {table}")
+                except Exception:
+                    pass
+            
+            # Видалення старих enum типів
+            enum_types = ['contentstatus', 'contenttype', 'duelstatus']
+            for enum_type in enum_types:
+                try:
+                    conn.execute(text(f"DROP TYPE IF EXISTS {enum_type} CASCADE"))
+                except Exception:
+                    pass
+        
+        # Створення нових таблиць
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Міграція завершена")
+        
+    except Exception as e:
+        logger.error(f"❌ Помилка міграції: {e}")
+        raise
+
+async def verify_database_integrity() -> bool:
+    """Перевірити цілісність БД"""
+    try:
+        if not MODELS_LOADED:
+            return False
+            
+        with get_db_session() as session:
+            # Перевірка основних таблиць
+            session.execute(text("SELECT 1 FROM users LIMIT 1"))
+            session.execute(text("SELECT 1 FROM content LIMIT 1"))
+            
+            logger.info("✅ Цілісність БД підтверджена")
+            return True
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Проблеми з цілісністю БД: {e}")
+        return False
+
 async def ensure_admin_exists():
     """Переконатися що адміністратор існує в БД"""
     try:
@@ -421,6 +495,9 @@ async def add_initial_data():
 __all__ = [
     'init_db',
     'get_db_session',
+    'check_if_migration_needed',
+    'migrate_database', 
+    'verify_database_integrity',
     'get_or_create_user',
     'get_user_by_id',
     'update_user_points',
