@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Основні команди бота з інтеграцією адмін-меню (ВИПРАВЛЕНО) 🧠😂🔥
+🧠😂🔥 Основні команди бота (ВИПРАВЛЕНО виклик get_or_create_user) 🧠😂🔥
 """
 
 import logging
@@ -15,34 +15,29 @@ from config.settings import settings, EMOJI, TEXTS
 
 logger = logging.getLogger(__name__)
 
-# ===== FALLBACK ЗНАЧЕННЯ ДЛЯ БЕЗПЕКИ =====
-def get_setting(attr_name: str, default_value):
-    """Безпечне отримання налаштувань з fallback"""
-    return getattr(settings, attr_name, default_value)
-
-# Константи балів з fallback
-POINTS_FOR_SUBMISSION = get_setting('POINTS_FOR_SUBMISSION', 10)
-POINTS_FOR_DUEL_WIN = get_setting('POINTS_FOR_DUEL_WIN', 15)
-POINTS_FOR_DAILY_ACTIVITY = get_setting('POINTS_FOR_DAILY_ACTIVITY', 2)
-POINTS_FOR_REACTION = get_setting('POINTS_FOR_REACTION', 5)
-POINTS_FOR_APPROVAL = get_setting('POINTS_FOR_APPROVAL', 20)
-
 async def cmd_start(message: Message):
     """Команда /start з автоматичним адмін-меню"""
     user_id = message.from_user.id
     first_name = message.from_user.first_name or "друже"
     
-    # Створюємо/оновлюємо користувача в БД
+    # 🔥 ВИПРАВЛЕНО: Створюємо/оновлюємо користувача в БД
     try:
         from database import get_or_create_user
-        await get_or_create_user(
-            user_id=user_id,
+        # ✅ ПРАВИЛЬНИЙ ВИКЛИК - telegram_id як перший аргумент
+        user = await get_or_create_user(
+            telegram_id=user_id,  # ✅ ВИПРАВЛЕНО: був user_id=user_id
             username=message.from_user.username,
             first_name=message.from_user.first_name,
             last_name=message.from_user.last_name
         )
+        
+        if user:
+            logger.info(f"✅ Користувач {user_id} успішно створено/оновлено")
+        else:
+            logger.warning(f"⚠️ Не вдалося створити користувача {user_id}")
+            
     except Exception as e:
-        logger.warning(f"Не вдалося створити користувача: {e}")
+        logger.error(f"❌ Помилка створення користувача {user_id}: {e}")
     
     # 🔥 ПЕРЕВІРЯЄМО ЧИ ЦЕ АДМІН І ПОКАЗУЄМО АДМІН-МЕНЮ
     try:
@@ -53,7 +48,7 @@ async def cmd_start(message: Message):
             # ✅ Для адміна показуємо тільки коротке основне меню
             keyboard = get_main_menu_keyboard()
             await message.answer(
-                f"{EMOJI['brain']} <b>Основне меню користувачів:</b>",
+                f"{EMOJI.get('brain', '🧠')} <b>Основне меню користувачів:</b>",
                 reply_markup=keyboard
             )
             logger.info(f"👑 Адмін {user_id} ({first_name}) запустив бота з адмін-меню")
@@ -78,223 +73,82 @@ async def cmd_start(message: Message):
         time_greeting = "Доброї ночі"
     
     welcome_text = (
-        f"{EMOJI['brain']}{EMOJI['laugh']}{EMOJI['fire']} <b>{time_greeting}, {first_name}!</b>\n\n"
+        f"{EMOJI.get('brain', '🧠')}{EMOJI.get('laugh', '😂')}{EMOJI.get('fire', '🔥')} <b>{time_greeting}, {first_name}!</b>\n\n"
         f"Ласкаво просимо до українського бота мемів та анекдотів!\n\n"
-        f"{EMOJI['star']} <b>Що я вмію:</b>\n"
-        f"{EMOJI['laugh']} Випадкові меми (+1 бал)\n"
-        f"{EMOJI['brain']} Українські анекдоти (+1 бал)\n"
-        f"{EMOJI['fire']} Прийом ваших жартів (+{POINTS_FOR_SUBMISSION} балів)\n"
-        f"{EMOJI['calendar']} Щоденна розсилка (+{POINTS_FOR_DAILY_ACTIVITY} бали)\n"
-        f"{EMOJI['vs']} Дуелі жартів (+{POINTS_FOR_DUEL_WIN} за перемогу)\n\n"
-        f"{EMOJI['party']} <b>Збирайте бали, підвищуйте ранг і ставайте легендою гумору!</b>\n\n"
-        f"Почніть з кнопок нижче або команди /help"
+        f"{EMOJI.get('star', '⭐')} <b>Що я вмію:</b>\n"
+        f"• {EMOJI.get('laugh', '😂')} Мемi та анекдоти\n"
+        f"• {EMOJI.get('fire', '🔥')} Система балів та рангів\n"
+        f"• {EMOJI.get('vs', '⚔️')} Дуелі жартів\n"
+        f"• {EMOJI.get('calendar', '📅')} Щоденна розсилка гумору\n\n"
+        f"🎮 <b>За активність ви отримуєте бали:</b>\n"
+        f"• +1 бал за перегляд контенту\n"
+        f"• +5 балів за лайк/дизлайк\n"
+        f"• +10 балів за подачу жарту\n"
+        f"• +15 балів за перемогу в дуелі\n\n"
+        f"Почніть з кнопок нижче! 👇"
     )
     
     await message.answer(welcome_text, reply_markup=keyboard)
-    
-    # Логування нового користувача
     logger.info(f"🎉 Користувач {user_id} ({first_name}) запустив бота")
 
-def get_main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Головне меню бота (✅ ВИПРАВЛЕНО)"""
+def get_main_menu_keyboard():
+    """Головне меню користувача"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=f"{EMOJI['laugh']} Мем (+1)", callback_data="get_meme"),
-            InlineKeyboardButton(text=f"{EMOJI['brain']} Анекдот (+1)", callback_data="get_joke")
+            InlineKeyboardButton(text="😂 Мем (+1)", callback_data="get_meme"),
+            InlineKeyboardButton(text="🧠 Анекдот (+1)", callback_data="get_anekdot")
         ],
         [
-            InlineKeyboardButton(text=f"{EMOJI['profile']} Профіль", callback_data="show_profile"),
-            InlineKeyboardButton(text=f"{EMOJI['top']} Лідери", callback_data="show_leaderboard")
+            InlineKeyboardButton(text="👤 Профіль", callback_data="show_profile"),
+            InlineKeyboardButton(text="🏆 Лідери", callback_data="show_leaderboard")
         ],
         [
-            InlineKeyboardButton(text=f"{EMOJI['calendar']} Щоденна розсилка", callback_data="toggle_daily"),
-            InlineKeyboardButton(text=f"{EMOJI['fire']} Надіслати жарт (+{POINTS_FOR_SUBMISSION})", callback_data="submit_content")
+            InlineKeyboardButton(text="🔥 Надіслати жарт (+10)", callback_data="submit_content"),
+            InlineKeyboardButton(text="⚔️ Дуель (+15)", callback_data="start_duel")
         ],
         [
-            InlineKeyboardButton(text=f"{EMOJI['vs']} Дуель (+{POINTS_FOR_DUEL_WIN})", callback_data="start_duel"),
-            InlineKeyboardButton(text=f"{EMOJI['help']} Допомога", callback_data="show_help")
+            InlineKeyboardButton(text="📅 Щоденна розсилка (+2)", callback_data="toggle_daily"),
+            InlineKeyboardButton(text="❓ Допомога", callback_data="show_help")
         ]
     ])
 
 async def cmd_help(message: Message):
-    """Команда /help (✅ ВИПРАВЛЕНО)"""
+    """Команда /help - довідка"""
     help_text = (
-        f"{EMOJI['help']} <b>ДОВІДКА ПО БОТУ</b>\n\n"
-        f"{EMOJI['brain']} <b>ОСНОВНІ КОМАНДИ:</b>\n"
-        f"• /meme - отримати випадковий мем (+1 бал)\n"
-        f"• /anekdot - отримати український анекдот (+1 бал)\n"
-        f"• /submit - надіслати свій мем або анекдот (+{POINTS_FOR_SUBMISSION} балів)\n"
-        f"• /daily - підписатися на щоденну розсилку\n\n"
-        f"{EMOJI['fire']} <b>ГЕЙМІФІКАЦІЯ:</b>\n"
-        f"• /profile - переглянути свій профіль та бали\n"
+        f"{EMOJI.get('brain', '🧠')} <b>Довідка по боту</b>\n\n"
+        f"<b>📋 Команди:</b>\n"
+        f"• /start - головне меню\n"
+        f"• /meme - випадковий мем\n"
+        f"• /anekdot - український анекдот\n"
+        f"• /profile - ваш профіль\n"
         f"• /top - таблиця лідерів\n"
-        f"• /duel - започаткувати дуель жартів\n\n"
-        f"{EMOJI['star']} <b>СИСТЕМА БАЛІВ:</b>\n"
-        f"• +1 бал - за перегляд контенту\n"
-        f"• +{POINTS_FOR_REACTION} балів - за лайк мему/анекдоту\n"
-        f"• +{POINTS_FOR_SUBMISSION} балів - за надісланий жарт\n"
-        f"• +{POINTS_FOR_APPROVAL} балів - якщо жарт схвалено\n"
-        f"• +{POINTS_FOR_DUEL_WIN} балів - за перемогу в дуелі\n"
-        f"• +1 бал автору - за кожен лайк його контенту (макс 10/день)\n\n"
-        f"{EMOJI['crown']} <b>РАНГИ:</b>\n"
-        f"🤡 Новачок → 😄 Сміхун → 😂 Гуморист → 🎭 Комік\n"
-        f"👑 Мастер Рофлу → 🏆 Король Гумору → 🌟 Легенда Мемів → 🚀 Геній\n\n"
-        f"{EMOJI['rocket']} Дякуємо за використання бота!"
+        f"• /submit - надіслати жарт\n"
+        f"• /duel - дуель жартів\n"
+        f"• /daily - підписка на розсилку\n\n"
+        f"<b>🎮 Система балів:</b>\n"
+        f"• +1 - перегляд мему/анекдоту\n"
+        f"• +5 - лайк або дизлайк\n"
+        f"• +10 - подача жарту на модерацію\n"
+        f"• +20 - схвалення вашого жарту\n"
+        f"• +15 - перемога в дуелі\n"
+        f"• +2 - щоденна активність\n\n"
+        f"<b>🏆 Ранги:</b>\n"
+        f"🤡 Новачок (0+ балів)\n"
+        f"😄 Сміхун (50+ балів)\n"
+        f"😂 Гуморист (150+ балів)\n"
+        f"🎭 Комік (350+ балів)\n"
+        f"👑 Мастер Рофлу (750+ балів)\n"
+        f"🏆 Король Гумору (1500+ балів)\n"
+        f"🌟 Легенда Мемів (3000+ балів)\n"
+        f"🚀 Гумористичний Геній (5000+ балів)\n\n"
+        f"💬 З питаннями звертайтесь до адміністратора!"
     )
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=f"{EMOJI['fire']} Головне меню", callback_data="show_main_menu"),
-            InlineKeyboardButton(text=f"{EMOJI['brain']} Почати", callback_data="get_joke")
-        ]
-    ])
-    
-    await message.answer(help_text, reply_markup=keyboard)
-
-async def cmd_stats(message: Message):
-    """Команда /stats - загальна статистика бота"""
-    try:
-        from database import get_db_session
-        
-        with get_db_session() as session:
-            from database.models import User, Content, Rating
-            
-            # Загальна статистика
-            total_users = session.query(User).count()
-            total_content = session.query(Content).filter(Content.status == "approved").count()
-            total_ratings = session.query(Rating).count()
-            
-            # Статистика сьогодні
-            today = datetime.utcnow().date()
-            today_ratings = session.query(Rating).filter(
-                Rating.created_at >= datetime.combine(today, datetime.min.time())
-            ).count()
-        
-        stats_text = (
-            f"{EMOJI['stats']} <b>СТАТИСТИКА БОТА</b>\n\n"
-            f"👥 Користувачів: {total_users}\n"
-            f"📝 Жартів схвалено: {total_content}\n"
-            f"💖 Всього оцінок: {total_ratings}\n"
-            f"🔥 Оцінок сьогодні: {today_ratings}\n\n"
-            f"⏰ Оновлено: {datetime.now().strftime('%H:%M %d.%m.%Y')}"
-        )
-        
-        await message.answer(stats_text)
-        
-    except Exception as e:
-        logger.error(f"Помилка статистики: {e}")
-        await message.answer(
-            f"{EMOJI['stats']} <b>СТАТИСТИКА БОТА</b>\n\n"
-            f"🔄 Завантажується...\n"
-            f"Спробуйте пізніше"
-        )
-
-# ===== CALLBACK ОБРОБНИКИ =====
-
-async def callback_get_meme(callback_query: CallbackQuery):
-    """Callback для отримання мему"""
-    try:
-        from handlers.content_handlers import send_personalized_meme
-        await send_personalized_meme(callback_query.message, from_callback=True)
-    except ImportError:
-        await callback_query.message.answer("🔄 Функція мемів завантажується...")
-    await callback_query.answer()
-
-async def callback_get_joke(callback_query: CallbackQuery):
-    """Callback для отримання анекдоту"""
-    try:
-        from handlers.content_handlers import send_personalized_joke
-        await send_personalized_joke(callback_query.message, from_callback=True)
-    except ImportError:
-        await callback_query.message.answer("🔄 Функція анекдотів завантажується...")
-    await callback_query.answer()
-
-async def callback_show_profile(callback_query: CallbackQuery):
-    """Callback для показу профілю"""
-    try:
-        from handlers.gamification_handlers import show_profile
-        await show_profile(callback_query.message, callback_query.from_user.id)
-    except ImportError:
-        await callback_query.answer("Функція профілю тимчасово недоступна")
-    await callback_query.answer()
-
-async def callback_show_leaderboard(callback_query: CallbackQuery):
-    """Callback для показу таблиці лідерів"""
-    try:
-        from handlers.gamification_handlers import show_leaderboard
-        await show_leaderboard(callback_query.message)
-    except ImportError:
-        await callback_query.answer("Таблиця лідерів тимчасово недоступна")
-    await callback_query.answer()
-
-async def callback_toggle_daily(callback_query: CallbackQuery):
-    """Callback для перемикання щоденної розсилки"""
-    try:
-        from handlers.gamification_handlers import toggle_daily_subscription
-        await toggle_daily_subscription(callback_query.message, callback_query.from_user.id)
-    except ImportError:
-        await callback_query.answer("Щоденна розсилка тимчасово недоступна")
-    await callback_query.answer()
-
-async def callback_submit_content(callback_query: CallbackQuery):
-    """Callback для початку подачі контенту (✅ ВИПРАВЛЕНО)"""
-    await callback_query.message.answer(
-        f"{EMOJI['fire']} <b>Як надіслати свій контент:</b>\n\n"
-        f"{EMOJI['brain']} <b>Для анекдоту:</b>\n"
-        f"Напиши /submit і одразу текст анекдоту\n\n"
-        f"{EMOJI['laugh']} <b>Для мему:</b>\n"
-        f"Надішли картинку з підписом\n\n"
-        f"{EMOJI['star']} <b>Приклад:</b>\n"
-        f"<code>/submit Чому програмісти п'ють каву? Бо без неї код не компілюється! {EMOJI['brain']}</code>\n\n"
-        f"💰 <b>Нагороди:</b>\n"
-        f"• +{POINTS_FOR_SUBMISSION} балів за подачу\n"
-        f"• +{POINTS_FOR_APPROVAL} балів за схвалення\n"
-        f"• +1 бал за кожен лайк від інших користувачів!"
-    )
-    await callback_query.answer()
-
-async def callback_start_duel(callback_query: CallbackQuery):
-    """Callback для початку дуелі"""
-    try:
-        from handlers.duel_handlers import start_duel
-        await start_duel(callback_query.message, callback_query.from_user.id)
-    except ImportError:
-        await callback_query.answer("Дуелі тимчасово недоступні")
-    await callback_query.answer()
-
-async def callback_show_help(callback_query: CallbackQuery):
-    """Callback для показу допомоги"""
-    await cmd_help(callback_query.message)
-    await callback_query.answer()
-
-async def callback_show_main_menu(callback_query: CallbackQuery):
-    """Callback для показу головного меню"""
-    keyboard = get_main_menu_keyboard()
-    
-    await callback_query.message.edit_text(
-        f"{EMOJI['fire']} <b>ГОЛОВНЕ МЕНЮ</b>\n\n"
-        f"Оберіть дію:",
-        reply_markup=keyboard
-    )
-    await callback_query.answer()
+    await message.answer(help_text)
 
 def register_basic_handlers(dp: Dispatcher):
     """Реєстрація основних хендлерів"""
-    
-    # Команди
     dp.message.register(cmd_start, CommandStart())
     dp.message.register(cmd_help, Command("help"))
-    dp.message.register(cmd_stats, Command("stats"))
     
-    # Callback запити
-    dp.callback_query.register(callback_get_meme, F.data == "get_meme")
-    dp.callback_query.register(callback_get_joke, F.data == "get_joke")
-    dp.callback_query.register(callback_show_profile, F.data == "show_profile")
-    dp.callback_query.register(callback_show_leaderboard, F.data == "show_leaderboard")
-    dp.callback_query.register(callback_toggle_daily, F.data == "toggle_daily")
-    dp.callback_query.register(callback_submit_content, F.data == "submit_content")
-    dp.callback_query.register(callback_start_duel, F.data == "start_duel")
-    dp.callback_query.register(callback_show_help, F.data == "show_help")
-    dp.callback_query.register(callback_show_main_menu, F.data == "show_main_menu")
-    
-    logger.info("🔥 Основні хендлери зареєстровано!")
+    logger.info("✅ Основні хендлери зареєстровано!")
