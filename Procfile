@@ -1,1 +1,1 @@
-web: python bobik_bot.py
+web: python main.py
