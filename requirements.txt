@@ -1,4 +1,18 @@
+# Основні залежності для професійного україномовного бота
+
+# Telegram Bot Framework
 aiogram>=3.4.0
+
+# HTTP клієнт
 aiohttp>=3.9.0
+
+# База даних
+SQLAlchemy>=2.0.0
 asyncpg>=0.29.0
+psycopg2-binary>=2.9.0
+
+# Конфігурація
 python-dotenv>=1.0.0
+
+# Асинхронні файли
+aiofiles>=24.1.0

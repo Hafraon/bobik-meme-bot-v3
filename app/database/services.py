@@ -1,378 +1,314 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-🧠😂🔥 Централізовані сервіси для роботи з базою даних 🧠😂🔥
-Безпечна робота з SQLAlchemy 2.0+ та уникнення detached objects
-"""
 
 import logging
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, timedelta
-from sqlalchemy.orm import joinedload
-from sqlalchemy import func, desc, and_, or_
+from datetime import datetime
+from typing import Optional, List, Dict, Any
+from contextlib import contextmanager
 
-from database.database import get_db_session
-from database.models import (
-    User, Content, Rating, Duel, DuelVote, 
-    ContentType, ContentStatus, DuelStatus
-)
+from sqlalchemy import create_engine, func
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger(__name__)
 
-class DatabaseService:
-    """Централізований сервіс для роботи з БД"""
+# Global database objects
+engine = None
+SessionLocal = None
+
+def init_database(database_url: str) -> bool:
+    """Ініціалізація бази даних"""
+    global engine, SessionLocal
     
-    # ===== СТАТИСТИКА =====
+    try:
+        from .models import Base
+        
+        # Створення engine
+        if database_url.startswith('sqlite'):
+            engine = create_engine(database_url, echo=False)
+        else:
+            engine = create_engine(
+                database_url, 
+                echo=False, 
+                pool_pre_ping=True,
+                pool_recycle=3600
+            )
+        
+        # Створення session factory
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        
+        # Створення таблиць
+        Base.metadata.create_all(engine)
+        
+        logger.info("✅ Database initialized successfully")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Database initialization error: {e}")
+        return False
+
+@contextmanager
+def get_db_session():
+    """Контекстний менеджер для сесії БД"""
+    if not SessionLocal:
+        raise RuntimeError("Database not initialized")
     
-    @staticmethod
-    def get_basic_stats() -> Dict[str, int]:
-        """Отримання базової статистики (без detached objects!)"""
+    session = SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Database session error: {e}")
+        raise
+    finally:
+        session.close()
+
+# ===== КОРИСТУВАЧІ =====
+
+def get_or_create_user(user_id: int, username: str = None, first_name: str = None, last_name: str = None) -> Optional[Dict]:
+    """Отримання або створення користувача"""
+    try:
+        from .models import User
+        
         with get_db_session() as session:
-            return {
-                "total_users": session.query(User).count(),
-                "total_content": session.query(Content).count(),
-                "pending_content": session.query(Content).filter(
-                    Content.status == ContentStatus.PENDING
-                ).count(),
-                "approved_content": session.query(Content).filter(
-                    Content.status == ContentStatus.APPROVED
-                ).count(),
-                "today_ratings": session.query(Rating).filter(
-                    Rating.created_at >= datetime.utcnow().date()
-                ).count(),
-                "active_duels": session.query(Duel).filter(
-                    Duel.status == DuelStatus.ACTIVE
-                ).count()
-            }
-    
-    @staticmethod
-    def get_detailed_stats() -> Dict[str, Any]:
-        """Детальна статистика з безпечним доступом до даних"""
-        with get_db_session() as session:
-            # Базові дані
-            basic_stats = DatabaseService.get_basic_stats()
+            # Пошук існуючого користувача
+            user = session.query(User).filter(User.user_id == user_id).first()
             
-            # ТОП користувачі (безпечно!)
-            top_users_query = session.query(
-                User.id,
-                User.first_name,
-                User.username,
-                User.points,
-                User.rank
-            ).order_by(desc(User.points)).limit(10)
-            
-            top_users = []
-            for user_data in top_users_query:
-                top_users.append({
-                    "id": user_data.id,
-                    "name": user_data.first_name or "Невідомий",
-                    "username": user_data.username,
-                    "points": user_data.points,
-                    "rank": user_data.rank
-                })
-            
-            # Статистика по типах контенту
-            content_stats = session.query(
-                Content.content_type,
-                func.count(Content.id).label('count')
-            ).filter(
-                Content.status == ContentStatus.APPROVED
-            ).group_by(Content.content_type).all()
-            
-            content_by_type = {}
-            for content_type, count in content_stats:
-                content_by_type[content_type.value] = count
-            
-            # Активність за тиждень
-            week_ago = datetime.utcnow() - timedelta(days=7)
-            weekly_activity = session.query(
-                func.date(Rating.created_at).label('date'),
-                func.count(Rating.id).label('activity')
-            ).filter(
-                Rating.created_at >= week_ago
-            ).group_by(func.date(Rating.created_at)).all()
-            
-            # Компіляція результатів
-            return {
-                **basic_stats,
-                "top_users": top_users,
-                "content_by_type": content_by_type,
-                "weekly_activity": [
-                    {"date": str(date), "activity": activity}
-                    for date, activity in weekly_activity
-                ]
-            }
-    
-    # ===== КОРИСТУВАЧІ =====
-    
-    @staticmethod
-    def get_users_management_data(page: int = 1, per_page: int = 20) -> Dict[str, Any]:
-        """Дані для управління користувачами"""
-        with get_db_session() as session:
-            # Основний запит з пагінацією
-            offset = (page - 1) * per_page
-            
-            users_query = session.query(
-                User.id,
-                User.first_name,
-                User.username,
-                User.points,
-                User.rank,
-                User.is_active,
-                User.last_activity,
-                func.count(Content.id).label('submissions_count')
-            ).outerjoin(
-                Content, User.id == Content.author_id
-            ).group_by(User.id).order_by(
-                desc(User.points)
-            ).offset(offset).limit(per_page)
-            
-            users_data = []
-            for user_row in users_query:
-                users_data.append({
-                    "id": user_row.id,
-                    "name": user_row.first_name or "Невідомий",
-                    "username": user_row.username,
-                    "points": user_row.points,
-                    "rank": user_row.rank,
-                    "is_active": user_row.is_active,
-                    "last_activity": user_row.last_activity.strftime('%d.%m.%Y %H:%M') if user_row.last_activity else "Немає",
-                    "submissions": user_row.submissions_count
-                })
-            
-            # Загальна кількість
-            total_users = session.query(User).count()
-            
-            return {
-                "users": users_data,
-                "page": page,
-                "per_page": per_page,
-                "total": total_users,
-                "total_pages": (total_users + per_page - 1) // per_page
-            }
-    
-    @staticmethod
-    def toggle_user_status(user_id: int) -> bool:
-        """Перемикання статусу користувача"""
-        with get_db_session() as session:
-            user = session.query(User).filter(User.id == user_id).first()
             if user:
-                user.is_active = not user.is_active
-                session.commit()
-                return user.is_active
-            return False
-    
-    # ===== КОНТЕНТ =====
-    
-    @staticmethod
-    def get_content_analytics() -> Dict[str, Any]:
-        """Аналітика контенту"""
-        with get_db_session() as session:
-            # Статистика по статусах
-            status_stats = session.query(
-                Content.status,
-                func.count(Content.id).label('count')
-            ).group_by(Content.status).all()
-            
-            # ТОП контент за переглядами
-            top_content = session.query(
-                Content.id,
-                Content.text,
-                Content.content_type,
-                Content.views,
-                Content.likes,
-                Content.dislikes,
-                User.first_name.label('author_name')
-            ).join(
-                User, Content.author_id == User.id
-            ).filter(
-                Content.status == ContentStatus.APPROVED
-            ).order_by(desc(Content.views)).limit(10).all()
-            
-            # Контент за останній тиждень
-            week_ago = datetime.utcnow() - timedelta(days=7)
-            recent_content = session.query(
-                func.date(Content.created_at).label('date'),
-                func.count(Content.id).label('count')
-            ).filter(
-                Content.created_at >= week_ago
-            ).group_by(func.date(Content.created_at)).all()
-            
-            return {
-                "status_distribution": {
-                    status.value: count for status, count in status_stats
-                },
-                "top_content": [
-                    {
-                        "id": row.id,
-                        "text": (row.text[:100] + "...") if row.text and len(row.text) > 100 else row.text,
-                        "type": row.content_type.value,
-                        "views": row.views,
-                        "likes": row.likes,
-                        "dislikes": row.dislikes,
-                        "author": row.author_name or "Невідомий"
-                    }
-                    for row in top_content
-                ],
-                "recent_submissions": [
-                    {"date": str(date), "count": count}
-                    for date, count in recent_content
-                ]
-            }
-    
-    @staticmethod
-    def get_trending_content(days: int = 7) -> List[Dict[str, Any]]:
-        """Трендовий контент за період"""
-        with get_db_session() as session:
-            since_date = datetime.utcnow() - timedelta(days=days)
-            
-            # Складна формула трендинга: (лайки - дизлайки) * 2 + перегляди
-            trending = session.query(
-                Content.id,
-                Content.text,
-                Content.content_type,
-                Content.views,
-                Content.likes,
-                Content.dislikes,
-                Content.created_at,
-                User.first_name.label('author_name'),
-                ((Content.likes - Content.dislikes) * 2 + Content.views).label('trend_score')
-            ).join(
-                User, Content.author_id == User.id
-            ).filter(
-                and_(
-                    Content.status == ContentStatus.APPROVED,
-                    Content.created_at >= since_date
+                # Оновлення інформації
+                if username and user.username != username:
+                    user.username = username
+                if first_name and user.first_name != first_name:
+                    user.first_name = first_name
+                if last_name and user.last_name != last_name:
+                    user.last_name = last_name
+                
+                user.last_activity = datetime.now()
+                user.updated_at = datetime.now()
+                
+            else:
+                # Створення нового користувача
+                user = User(
+                    user_id=user_id,
+                    username=username,
+                    first_name=first_name,
+                    last_name=last_name,
+                    created_at=datetime.now(),
+                    last_activity=datetime.now()
                 )
-            ).order_by(desc('trend_score')).limit(20).all()
-            
-            return [
-                {
-                    "id": row.id,
-                    "text": (row.text[:150] + "...") if row.text and len(row.text) > 150 else row.text,
-                    "type": row.content_type.value,
-                    "views": row.views,
-                    "likes": row.likes,
-                    "dislikes": row.dislikes,
-                    "author": row.author_name or "Невідомий",
-                    "trend_score": int(row.trend_score),
-                    "created": row.created_at.strftime('%d.%m.%Y')
-                }
-                for row in trending
-            ]
-    
-    # ===== МОДЕРАЦІЯ =====
-    
-    @staticmethod
-    def get_pending_content(limit: int = 1) -> List[Dict[str, Any]]:
-        """Контент на модерації"""
-        with get_db_session() as session:
-            pending = session.query(
-                Content.id,
-                Content.text,
-                Content.file_id,
-                Content.content_type,
-                Content.created_at,
-                User.first_name.label('author_name'),
-                User.username.label('author_username')
-            ).join(
-                User, Content.author_id == User.id
-            ).filter(
-                Content.status == ContentStatus.PENDING
-            ).order_by(Content.created_at).limit(limit).all()
-            
-            return [
-                {
-                    "id": row.id,
-                    "text": row.text,
-                    "file_id": row.file_id,
-                    "type": row.content_type.value,
-                    "author_name": row.author_name or "Невідомий",
-                    "author_username": row.author_username,
-                    "created": row.created_at.strftime('%d.%m.%Y %H:%M')
-                }
-                for row in pending
-            ]
-    
-    @staticmethod
-    def moderate_content(content_id: int, approve: bool, moderator_id: int, comment: str = None) -> bool:
-        """Модерація контенту"""
-        with get_db_session() as session:
-            content = session.query(Content).filter(Content.id == content_id).first()
-            if not content:
-                return False
-            
-            # Встановлюємо новий статус
-            content.status = ContentStatus.APPROVED if approve else ContentStatus.REJECTED
-            content.moderator_id = moderator_id
-            content.moderated_at = datetime.utcnow()
-            if comment:
-                content.moderation_comment = comment
-            
-            # Нараховуємо бали автору за схвалення
-            if approve:
-                author = session.query(User).filter(User.id == content.author_id).first()
-                if author:
-                    author.points += 20  # Бонус за схвалений контент
+                session.add(user)
             
             session.commit()
-            return True
-    
-    # ===== ДУЕЛІ =====
-    
-    @staticmethod
-    def get_active_duels() -> List[Dict[str, Any]]:
-        """Активні дуелі"""
+            
+            return {
+                'id': user.id,
+                'user_id': user.user_id,
+                'username': user.username,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'points': user.points,
+                'rank': user.rank,
+                'created_at': user.created_at
+            }
+            
+    except Exception as e:
+        logger.error(f"Error in get_or_create_user: {e}")
+        return None
+
+def update_user_points(user_id: int, points_change: int, reason: str = "") -> bool:
+    """Оновлення балів користувача"""
+    try:
+        from .models import User
+        
         with get_db_session() as session:
-            duels = session.query(
-                Duel.id,
-                Duel.initiator_votes,
-                Duel.opponent_votes,
-                Duel.created_at,
-                User.first_name.label('initiator_name')
-            ).join(
-                User, Duel.initiator_id == User.id
-            ).filter(
-                Duel.status == DuelStatus.ACTIVE
-            ).order_by(desc(Duel.created_at)).all()
+            user = session.query(User).filter(User.user_id == user_id).first()
+            
+            if user:
+                old_points = user.points
+                user.points = max(0, user.points + points_change)
+                user.updated_at = datetime.now()
+                
+                session.commit()
+                
+                logger.info(f"User {user_id} points: {old_points} -> {user.points} ({reason})")
+                return True
+            else:
+                logger.warning(f"User {user_id} not found for points update")
+                return False
+                
+    except Exception as e:
+        logger.error(f"Error updating user points: {e}")
+        return False
+
+def get_user_stats(user_id: int) -> Optional[Dict]:
+    """Отримання статистики користувача"""
+    try:
+        from .models import User
+        
+        with get_db_session() as session:
+            user = session.query(User).filter(User.user_id == user_id).first()
+            
+            if user:
+                return {
+                    'user_id': user.user_id,
+                    'points': user.points,
+                    'rank': user.rank,
+                    'total_views': user.total_views,
+                    'total_likes': user.total_likes,
+                    'total_submissions': user.total_submissions,
+                    'total_approvals': user.total_approvals,
+                    'total_duels': user.total_duels,
+                    'created_at': user.created_at,
+                    'last_activity': user.last_activity
+                }
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error getting user stats: {e}")
+        return None
+
+def get_top_users(limit: int = 10) -> List[Dict]:
+    """Отримання топ користувачів по балах"""
+    try:
+        from .models import User
+        
+        with get_db_session() as session:
+            users = session.query(User)\
+                          .filter(User.is_active == True)\
+                          .order_by(User.points.desc())\
+                          .limit(limit)\
+                          .all()
             
             return [
                 {
-                    "id": row.id,
-                    "initiator": row.initiator_name or "Невідомий",
-                    "votes_a": row.initiator_votes,
-                    "votes_b": row.opponent_votes,
-                    "created": row.created_at.strftime('%d.%m.%Y %H:%M')
+                    'user_id': user.user_id,
+                    'first_name': user.first_name,
+                    'username': user.username,
+                    'points': user.points,
+                    'rank': user.rank
                 }
-                for row in duels
+                for user in users
             ]
-    
-    # ===== ДОДАТКОВА ФУНКЦІЯ ДЛЯ ADMIN HANDLERS =====
-    
-    @staticmethod
-    def moderate_content(content_id: int, approve: bool, moderator_id: int, comment: str = None) -> bool:
-        """Модерація контенту (додана для admin handlers)"""
-        try:
-            with get_db_session() as session:
-                content = session.query(Content).filter(Content.id == content_id).first()
-                if not content:
-                    return False
-                
-                # Встановлюємо новий статус
-                content.status = ContentStatus.APPROVED if approve else ContentStatus.REJECTED
-                content.moderator_id = moderator_id
-                content.moderated_at = datetime.utcnow()
-                if comment:
-                    content.moderation_comment = comment
-                
-                # Нараховуємо бали автору за схвалення
-                if approve:
-                    author = session.query(User).filter(User.id == content.author_id).first()
-                    if author:
-                        author.points += 20  # Бонус за схвалений контент
-                
+            
+    except Exception as e:
+        logger.error(f"Error getting top users: {e}")
+        return []
+
+# ===== КОНТЕНТ =====
+
+def add_content(author_user_id: int, content_type: str, text: str, media_url: str = None) -> Optional[int]:
+    """Додавання нового контенту"""
+    try:
+        from .models import Content, User
+        
+        with get_db_session() as session:
+            # Знаходимо автора
+            user = session.query(User).filter(User.user_id == author_user_id).first()
+            if not user:
+                logger.warning(f"User {author_user_id} not found for content creation")
+                return None
+            
+            # Створюємо контент
+            content = Content(
+                content_type=content_type,
+                text=text,
+                media_url=media_url,
+                author_id=user.id,
+                author_user_id=author_user_id,
+                created_at=datetime.now()
+            )
+            
+            session.add(content)
+            session.commit()
+            
+            # Оновлюємо статистику користувача
+            user.total_submissions += 1
+            session.commit()
+            
+            logger.info(f"Content {content.id} created by user {author_user_id}")
+            return content.id
+            
+    except Exception as e:
+        logger.error(f"Error adding content: {e}")
+        return None
+
+def get_random_approved_content(content_type: str = None) -> Optional[Dict]:
+    """Отримання випадкового схваленого контенту"""
+    try:
+        from .models import Content, ContentStatus
+        
+        with get_db_session() as session:
+            query = session.query(Content)\
+                          .filter(Content.status == ContentStatus.APPROVED.value)
+            
+            if content_type:
+                query = query.filter(Content.content_type == content_type)
+            
+            content = query.order_by(func.random()).first()
+            
+            if content:
+                # Збільшуємо лічильник переглядів
+                content.views += 1
                 session.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Помилка модерації контенту {content_id}: {e}")
-            return False
+                
+                return {
+                    'id': content.id,
+                    'type': content.content_type,
+                    'text': content.text,
+                    'media_url': content.media_url,
+                    'views': content.views,
+                    'likes': content.likes,
+                    'author_user_id': content.author_user_id
+                }
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error getting random content: {e}")
+        return None
+
+# ===== СТАТИСТИКА =====
+
+def get_basic_stats() -> Dict[str, int]:
+    """Отримання базової статистики бота"""
+    try:
+        from .models import User, Content, Duel
+        
+        with get_db_session() as session:
+            total_users = session.query(User).filter(User.is_active == True).count()
+            total_content = session.query(Content).count()
+            approved_content = session.query(Content).filter(Content.status == 'approved').count()
+            pending_content = session.query(Content).filter(Content.status == 'pending').count()
+            total_duels = session.query(Duel).count()
+            
+            return {
+                'total_users': total_users,
+                'total_content': total_content,
+                'approved_content': approved_content,
+                'pending_content': pending_content,
+                'total_duels': total_duels
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting basic stats: {e}")
+        return {
+            'total_users': 0,
+            'total_content': 0,
+            'approved_content': 0,
+            'pending_content': 0,
+            'total_duels': 0
+        }
+
+# ===== ТЕСТУВАННЯ =====
+
+def test_database_connection() -> bool:
+    """Тестування з'єднання з базою даних"""
+    try:
+        with get_db_session() as session:
+            # Простий тестовий запит
+            result = session.execute("SELECT 1").fetchone()
+            return result is not None
+            
+    except Exception as e:
+        logger.error(f"Database connection test failed: {e}")
+        return False

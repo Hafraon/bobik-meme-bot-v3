@@ -1,257 +1,150 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-🧠😂🔥 ПРОФЕСІЙНІ МОДЕЛІ БАЗИ ДАНИХ (ПОВНА ВЕРСІЯ) 🧠😂🔥
-"""
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, ForeignKey, Enum as SQLEnum
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from datetime import datetime
-from enum import Enum
 
 Base = declarative_base()
 
-# ===== ЕНУМИ =====
-
 class ContentType(Enum):
-    JOKE = "joke"
+    """Типи контенту"""
     MEME = "meme"
+    JOKE = "joke"
+    ANEKDOT = "anekdot"
 
 class ContentStatus(Enum):
+    """Статуси контенту"""
     PENDING = "pending"
-    APPROVED = "approved"
+    APPROVED = "approved" 
     REJECTED = "rejected"
 
-class UserRank(Enum):
-    NEWBIE = "Новачок"
-    JOKER = "Жартівник" 
-    COMEDIAN = "Комік"
-    HUMORIST = "Гуморист"
-    MASTER = "Майстер сміху"
-    EXPERT = "Експерт гумору"
-    VIRTUOSO = "Віртуоз жартів"
-    LEGEND = "Легенда гумору"
-
-# ===== ОСНОВНІ МОДЕЛІ =====
+class DuelStatus(Enum):
+    """Статуси дуелей"""
+    ACTIVE = "active"
+    FINISHED = "finished"
+    CANCELLED = "cancelled"
 
 class User(Base):
-    """
-    Модель користувача з повним набором полів для гейміфікації
-    """
+    """Модель користувача"""
     __tablename__ = "users"
     
-    # ===== ОСНОВНІ ПОЛЯ =====
-    id = Column(Integer, primary_key=True, index=True)
-    telegram_id = Column(Integer, unique=True, index=True, nullable=False)
-    username = Column(String(50), nullable=True, index=True)
-    first_name = Column(String(100), nullable=True)
-    last_name = Column(String(100), nullable=True)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, unique=True, nullable=False, index=True)
+    username = Column(String(255), nullable=True)
+    first_name = Column(String(255), nullable=True)
+    last_name = Column(String(255), nullable=True)
     
-    # ===== СТАТУСИ ТА ПРАВА =====
-    is_active = Column(Boolean, default=True, nullable=False, index=True)  # ✅ ВИПРАВЛЕНО!
-    is_premium = Column(Boolean, default=False, nullable=False)
-    is_admin = Column(Boolean, default=False, nullable=False, index=True)
-    is_banned = Column(Boolean, default=False, nullable=False)
+    # Статистика
+    points = Column(Integer, default=0)
+    total_views = Column(Integer, default=0)
+    total_likes = Column(Integer, default=0)
+    total_submissions = Column(Integer, default=0)
+    total_approvals = Column(Integer, default=0)
+    total_duels = Column(Integer, default=0)
     
-    # ===== ГЕЙМІФІКАЦІЯ =====
-    total_points = Column(Integer, default=0, index=True)
-    current_rank = Column(SQLEnum(UserRank), default=UserRank.NEWBIE, nullable=False)
+    # Налаштування
+    daily_notifications = Column(Boolean, default=True)
+    language = Column(String(10), default="uk")
+    timezone = Column(String(50), default="Europe/Kiev")
     
-    # ===== ЛІЧИЛЬНИКИ КОНТЕНТУ =====
-    jokes_submitted = Column(Integer, default=0)
-    jokes_approved = Column(Integer, default=0)
-    memes_submitted = Column(Integer, default=0)
-    memes_approved = Column(Integer, default=0)
+    # Системні поля
+    is_active = Column(Boolean, default=True)
+    is_banned = Column(Boolean, default=False)
+    ban_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    last_activity = Column(DateTime, default=func.now())
     
-    # ===== ЛІЧИЛЬНИКИ ВЗАЄМОДІЇ =====
-    likes_given = Column(Integer, default=0)
-    dislikes_given = Column(Integer, default=0)
-    comments_made = Column(Integer, default=0)
-    content_views = Column(Integer, default=0)
-    
-    # ===== ДУЕЛІ =====
-    duels_won = Column(Integer, default=0)
-    duels_lost = Column(Integer, default=0)
-    duels_participated = Column(Integer, default=0)
-    
-    # ===== НАЛАШТУВАННЯ =====
-    daily_subscription = Column(Boolean, default=False)
-    last_daily_content = Column(DateTime, nullable=True)
-    notification_settings = Column(Text, nullable=True)  # JSON формат
-    
-    # ===== ПЕРСОНАЛІЗАЦІЯ =====
-    preferred_content_type = Column(String(20), default="mixed")  # joke, meme, mixed
-    content_difficulty = Column(Integer, default=1)  # 1-5
-    favorite_topics = Column(Text, nullable=True)  # JSON список тем
-    language_preference = Column(String(10), default="uk")
-    
-    # ===== МЕТАДАНІ =====
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    last_activity = Column(DateTime, server_default=func.now(), index=True)
-    last_seen_content_id = Column(Integer, nullable=True)
-    
-    # ===== СТАТИСТИКА СЕСІЙ =====
-    total_sessions = Column(Integer, default=0)
-    total_time_spent = Column(Integer, default=0)  # секунди
-    average_session_length = Column(Float, default=0.0)
-    
-    # ===== ЗВ'ЯЗКИ =====
-    submitted_content = relationship("Content", foreign_keys="[Content.author_id]", back_populates="author")
-    moderated_content = relationship("Content", foreign_keys="[Content.moderator_id]", back_populates="moderator")
+    # Зв'язки
+    content = relationship("Content", back_populates="author")
     ratings = relationship("Rating", back_populates="user")
-    admin_actions = relationship("AdminAction", back_populates="admin")
+    duel_votes = relationship("DuelVote", back_populates="user")
     
     def __repr__(self):
-        return f"<User(id={self.id}, telegram_id={self.telegram_id}, username={self.username}, rank={self.current_rank})>"
+        return f"<User(user_id={self.user_id}, username={self.username})>"
     
-    def get_full_name(self) -> str:
-        """Отримати повне ім'я користувача"""
+    @property
+    def rank(self):
+        """Отримання рангу користувача по балах"""
+        from config.settings import get_rank_by_points
+        return get_rank_by_points(self.points)
+    
+    @property
+    def full_name(self):
+        """Повне ім'я користувача"""
         parts = []
         if self.first_name:
             parts.append(self.first_name)
         if self.last_name:
             parts.append(self.last_name)
-        return " ".join(parts) or self.username or f"User {self.telegram_id}"
-    
-    def get_rank_progress(self) -> dict:
-        """Отримати прогрес рангу"""
-        rank_requirements = {
-            UserRank.NEWBIE: 0,
-            UserRank.JOKER: 50,
-            UserRank.COMEDIAN: 150,
-            UserRank.HUMORIST: 300,
-            UserRank.MASTER: 600,
-            UserRank.EXPERT: 1000,
-            UserRank.VIRTUOSO: 1500,
-            UserRank.LEGEND: 2500
-        }
-        
-        current_points = self.total_points
-        current_rank = self.current_rank
-        
-        ranks = list(UserRank)
-        current_index = ranks.index(current_rank)
-        
-        next_rank = None
-        points_to_next = 0
-        progress_percent = 100
-        
-        if current_index < len(ranks) - 1:
-            next_rank = ranks[current_index + 1]
-            points_to_next = rank_requirements[next_rank] - current_points
-            current_rank_min = rank_requirements[current_rank]
-            next_rank_min = rank_requirements[next_rank]
-            progress_percent = min(100, ((current_points - current_rank_min) / (next_rank_min - current_rank_min)) * 100)
-        
-        return {
-            "current_rank": current_rank.value,
-            "current_points": current_points,
-            "next_rank": next_rank.value if next_rank else None,
-            "points_to_next": max(0, points_to_next) if next_rank else 0,
-            "progress_percent": round(progress_percent, 1)
-        }
+        return " ".join(parts) if parts else self.username or f"User{self.user_id}"
 
 class Content(Base):
-    """
-    Модель контенту з розширеними можливостями
-    """
+    """Модель контенту"""
     __tablename__ = "content"
     
-    # ===== ОСНОВНІ ПОЛЯ =====
-    id = Column(Integer, primary_key=True, index=True)
-    content_type = Column(SQLEnum(ContentType), nullable=False, index=True)
-    text = Column(Text, nullable=True)
-    file_id = Column(String(500), nullable=True)
+    id = Column(Integer, primary_key=True)
+    content_type = Column(String(20), nullable=False)
+    status = Column(String(20), default=ContentStatus.PENDING.value)
     
-    # ===== АВТОР ТА МОДЕРАТОР =====
-    author_id = Column(Integer, ForeignKey("users.telegram_id"), nullable=False, index=True)
-    moderator_id = Column(Integer, ForeignKey("users.telegram_id"), nullable=True)
+    # Контент
+    text = Column(Text, nullable=False)
+    media_url = Column(String(1000), nullable=True)
+    media_type = Column(String(50), nullable=True)
     
-    # ===== СТАТУС МОДЕРАЦІЇ =====
-    status = Column(SQLEnum(ContentStatus), default=ContentStatus.PENDING, nullable=False, index=True)
-    moderation_comment = Column(Text, nullable=True)
+    # Автор
+    author_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    author_user_id = Column(Integer, nullable=False)
+    
+    # Модерація
+    moderated_by = Column(Integer, nullable=True)
     moderated_at = Column(DateTime, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
     
-    # ===== СТАТИСТИКА ПОПУЛЯРНОСТІ =====
-    views = Column(Integer, default=0, index=True)
-    likes = Column(Integer, default=0, index=True)
-    dislikes = Column(Integer, default=0, index=True)
+    # Статистика
+    views = Column(Integer, default=0)
+    likes = Column(Integer, default=0)
+    dislikes = Column(Integer, default=0)
     shares = Column(Integer, default=0)
-    reports = Column(Integer, default=0)
+    rating_average = Column(Float, default=0.0)
+    rating_count = Column(Integer, default=0)
     
-    # ===== ПЕРСОНАЛІЗАЦІЯ КОНТЕНТУ =====
-    topic = Column(String(50), default="general", index=True)  # life, work, tech, family, etc.
-    style = Column(String(50), default="neutral")  # irony, sarcasm, wholesome, absurd
-    difficulty = Column(Integer, default=1)  # 1-5 складність для розуміння
-    target_age = Column(String(20), default="all")  # teen, adult, all
+    # Системні поля
+    is_featured = Column(Boolean, default=False)
+    is_archived = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
-    # ===== АЛГОРИТМІЧНІ ПОКАЗНИКИ =====
-    quality_score = Column(Float, default=0.5)  # 0.0-1.0 якість контенту
-    popularity_score = Column(Float, default=0.0)  # розрахований показник популярності
-    engagement_rate = Column(Float, default=0.0)  # рівень залученості
-    virality_score = Column(Float, default=0.0)  # вірусний потенціал
-    
-    # ===== МЕТАДАНІ =====
-    created_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    last_shown_at = Column(DateTime, nullable=True)
-    
-    # ===== ТЕХНІЧНІ ДАНІ =====
-    original_message_id = Column(Integer, nullable=True)
-    hashtags = Column(Text, nullable=True)  # JSON список хештегів
-    mentions = Column(Text, nullable=True)  # JSON список згадок
-    
-    # ===== ЗВ'ЯЗКИ =====
-    author = relationship("User", foreign_keys=[author_id], back_populates="submitted_content")
-    moderator = relationship("User", foreign_keys=[moderator_id], back_populates="moderated_content")
+    # Зв'язки
+    author = relationship("User", back_populates="content")
     ratings = relationship("Rating", back_populates="content")
     
     def __repr__(self):
-        return f"<Content(id={self.id}, type={self.content_type}, status={self.status}, likes={self.likes})>"
-    
-    def get_engagement_stats(self) -> dict:
-        """Статистика залученості"""
-        total_interactions = self.likes + self.dislikes + self.shares
-        engagement_rate = (total_interactions / max(self.views, 1)) * 100 if self.views > 0 else 0
-        like_ratio = (self.likes / max(total_interactions, 1)) * 100 if total_interactions > 0 else 0
-        
-        return {
-            "views": self.views,
-            "likes": self.likes,
-            "dislikes": self.dislikes,
-            "shares": self.shares,
-            "total_interactions": total_interactions,
-            "engagement_rate": round(engagement_rate, 2),
-            "like_ratio": round(like_ratio, 2)
-        }
+        return f"<Content(id={self.id}, type={self.content_type}, status={self.status})>"
 
 class Rating(Base):
-    """
-    Модель оцінок контенту
-    """
+    """Модель рейтингу контенту"""
     __tablename__ = "ratings"
     
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.telegram_id"), nullable=False, index=True)
-    content_id = Column(Integer, ForeignKey("content.id"), nullable=False, index=True)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    content_id = Column(Integer, ForeignKey("content.id"), nullable=False)
     
-    # ===== ОСНОВНА ОЦІНКА =====
-    rating = Column(Integer, nullable=False)  # 1 для like, -1 для dislike
-    comment = Column(Text, nullable=True)
+    # Рейтинг
+    rating = Column(Integer, nullable=False)  # 1-5 зірок
+    reaction = Column(String(20), nullable=True)  # like, dislike, love, laugh
     
-    # ===== ДОДАТКОВІ ОЦІНКИ =====
-    funniness = Column(Integer, nullable=True)  # 1-5
-    originality = Column(Integer, nullable=True)  # 1-5
-    appropriateness = Column(Integer, nullable=True)  # 1-5
+    # Системні поля
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
-    # ===== МЕТАДАНІ =====
-    created_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)
-    ip_address = Column(String(45), nullable=True)  # для запобігання зловживанням
-    
-    # ===== ЗВ'ЯЗКИ =====
+    # Зв'язки
     user = relationship("User", back_populates="ratings")
     content = relationship("Content", back_populates="ratings")
     
@@ -259,154 +152,119 @@ class Rating(Base):
         return f"<Rating(user_id={self.user_id}, content_id={self.content_id}, rating={self.rating})>"
 
 class Duel(Base):
-    """
-    Модель дуелей жартів
-    """
+    """Модель дуелі жартів"""
     __tablename__ = "duels"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
+    status = Column(String(20), default=DuelStatus.ACTIVE.value)
     
-    # ===== УЧАСНИКИ =====
-    challenger_id = Column(Integer, ForeignKey("users.telegram_id"), nullable=False)
-    opponent_id = Column(Integer, ForeignKey("users.telegram_id"), nullable=False)
+    # Контенти для дуелі
+    content1_id = Column(Integer, ForeignKey("content.id"), nullable=False)
+    content2_id = Column(Integer, ForeignKey("content.id"), nullable=False)
     
-    # ===== КОНТЕНТ ДУЕЛІ =====
-    challenger_content_id = Column(Integer, ForeignKey("content.id"), nullable=False)
-    opponent_content_id = Column(Integer, ForeignKey("content.id"), nullable=True)
+    # Створювач дуелі
+    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
-    # ===== СТАТУС ТА РЕЗУЛЬТАТИ =====
-    status = Column(String(20), default="waiting", index=True)  # waiting, active, completed, cancelled
-    winner_id = Column(Integer, ForeignKey("users.telegram_id"), nullable=True)
-    
-    # ===== ГОЛОСУВАННЯ =====
-    challenger_votes = Column(Integer, default=0)
-    opponent_votes = Column(Integer, default=0)
+    # Результати
+    winner_content_id = Column(Integer, ForeignKey("content.id"), nullable=True)
+    content1_votes = Column(Integer, default=0)
+    content2_votes = Column(Integer, default=0)
     total_votes = Column(Integer, default=0)
     
-    # ===== ПРИЗОВІ БАЛИ =====
-    prize_points = Column(Integer, default=15)
+    # Налаштування
+    voting_duration = Column(Integer, default=300)  # секунд
+    min_votes = Column(Integer, default=3)
     
-    # ===== ЧАСОВІ РАМКИ =====
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    # Системні поля
+    created_at = Column(DateTime, default=func.now())
     started_at = Column(DateTime, nullable=True)
-    ended_at = Column(DateTime, nullable=True)
-    voting_ends_at = Column(DateTime, nullable=True, index=True)
+    finished_at = Column(DateTime, nullable=True)
     
-    # ===== МЕТАДАНІ =====
-    category = Column(String(50), default="general")
-    difficulty_level = Column(Integer, default=1)
+    # Зв'язки
+    content1 = relationship("Content", foreign_keys=[content1_id])
+    content2 = relationship("Content", foreign_keys=[content2_id])
+    winner_content = relationship("Content", foreign_keys=[winner_content_id])
+    creator = relationship("User")
+    votes = relationship("DuelVote", back_populates="duel")
     
     def __repr__(self):
-        return f"<Duel(id={self.id}, challenger={self.challenger_id}, opponent={self.opponent_id}, status={self.status})>"
+        return f"<Duel(id={self.id}, status={self.status})>"
 
 class DuelVote(Base):
-    """
-    Модель голосів у дуелях
-    """
+    """Модель голосування в дуелі"""
     __tablename__ = "duel_votes"
     
-    id = Column(Integer, primary_key=True, index=True)
-    duel_id = Column(Integer, ForeignKey("duels.id"), nullable=False, index=True)
-    voter_id = Column(Integer, ForeignKey("users.telegram_id"), nullable=False, index=True)
+    id = Column(Integer, primary_key=True)
+    duel_id = Column(Integer, ForeignKey("duels.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    content_id = Column(Integer, ForeignKey("content.id"), nullable=False)
     
-    # ===== ГОЛОС =====
-    vote = Column(String(20), nullable=False)  # "challenger" або "opponent"
-    confidence = Column(Integer, default=5)  # 1-10 впевненість у виборі
+    # Системні поля
+    created_at = Column(DateTime, default=func.now())
     
-    # ===== МЕТАДАНІ =====
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    ip_address = Column(String(45), nullable=True)
+    # Зв'язки
+    duel = relationship("Duel", back_populates="votes")
+    user = relationship("User", back_populates="duel_votes")
+    content = relationship("Content")
     
     def __repr__(self):
-        return f"<DuelVote(duel_id={self.duel_id}, voter_id={self.voter_id}, vote={self.vote})>"
+        return f"<DuelVote(duel_id={self.duel_id}, user_id={self.user_id})>"
 
 class AdminAction(Base):
-    """
-    Модель дій адміністраторів для аудиту
-    """
+    """Модель дій адміністратора"""
     __tablename__ = "admin_actions"
     
-    id = Column(Integer, primary_key=True, index=True)
-    admin_id = Column(Integer, ForeignKey("users.telegram_id"), nullable=False, index=True)
-    
-    # ===== ДІЯ =====
-    action_type = Column(String(50), nullable=False, index=True)  # moderate_content, ban_user, etc.
+    id = Column(Integer, primary_key=True)
+    admin_id = Column(Integer, nullable=False)
+    action_type = Column(String(50), nullable=False)
     target_type = Column(String(50), nullable=True)  # user, content, duel
     target_id = Column(Integer, nullable=True)
     
-    # ===== ДЕТАЛІ =====
-    details = Column(Text, nullable=True)  # JSON з деталями дії
-    reason = Column(Text, nullable=True)
+    # Деталі дії
+    description = Column(Text, nullable=True)
     old_value = Column(Text, nullable=True)
     new_value = Column(Text, nullable=True)
+    reason = Column(Text, nullable=True)
     
-    # ===== МЕТАДАНІ =====
-    created_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)
-    ip_address = Column(String(45), nullable=True)
-    
-    # ===== ЗВ'ЯЗКИ =====
-    admin = relationship("User", back_populates="admin_actions")
+    # Системні поля
+    created_at = Column(DateTime, default=func.now())
+    ip_address = Column(String(50), nullable=True)
     
     def __repr__(self):
-        return f"<AdminAction(id={self.id}, admin_id={self.admin_id}, action={self.action_type})>"
+        return f"<AdminAction(admin_id={self.admin_id}, action={self.action_type})>"
 
 class BotStatistics(Base):
-    """
-    Модель щоденної статистики бота
-    """
+    """Модель статистики бота"""
     __tablename__ = "bot_statistics"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
+    date = Column(DateTime, default=func.now())
     
-    # ===== СТАТИСТИКА КОРИСТУВАЧІВ =====
+    # Користувачі
     total_users = Column(Integer, default=0)
-    new_users_today = Column(Integer, default=0)
-    active_users_today = Column(Integer, default=0)
-    active_users_week = Column(Integer, default=0)
-    active_users_month = Column(Integer, default=0)
+    new_users = Column(Integer, default=0)
+    active_users = Column(Integer, default=0)
     
-    # ===== СТАТИСТИКА КОНТЕНТУ =====
+    # Контент
     total_content = Column(Integer, default=0)
-    new_content_today = Column(Integer, default=0)
+    new_content = Column(Integer, default=0)
     approved_content = Column(Integer, default=0)
-    pending_content = Column(Integer, default=0)
     rejected_content = Column(Integer, default=0)
     
-    # ===== СТАТИСТИКА ВЗАЄМОДІЇ =====
-    total_likes_today = Column(Integer, default=0)
-    total_views_today = Column(Integer, default=0)
-    total_shares_today = Column(Integer, default=0)
+    # Активність
+    total_messages = Column(Integer, default=0)
+    total_commands = Column(Integer, default=0)
+    total_reactions = Column(Integer, default=0)
     
-    # ===== СТАТИСТИКА ДУЕЛЕЙ =====
+    # Дуелі
     total_duels = Column(Integer, default=0)
-    active_duels = Column(Integer, default=0)
-    completed_duels_today = Column(Integer, default=0)
+    new_duels = Column(Integer, default=0)
+    finished_duels = Column(Integer, default=0)
     
-    # ===== ТЕХНІЧНА СТАТИСТИКА =====
-    average_response_time = Column(Float, default=0.0)
-    error_count_today = Column(Integer, default=0)
-    uptime_percentage = Column(Float, default=100.0)
-    
-    # ===== ЧАСОВІ МІТКИ =====
-    date = Column(DateTime, server_default=func.now(), unique=True, index=True)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    # Системні метрики
+    uptime_seconds = Column(Integer, default=0)
+    errors_count = Column(Integer, default=0)
+    avg_response_time = Column(Float, default=0.0)
     
     def __repr__(self):
-        return f"<BotStatistics(date={self.date}, users={self.total_users}, content={self.total_content})>"
-
-# ===== ІНДЕКСИ ДЛЯ ОПТИМІЗАЦІЇ =====
-
-# Створюємо складені індекси для часто використовуваних запитів
-from sqlalchemy import Index
-
-# Індекс для пошуку активного контенту
-Index('idx_content_status_type', Content.status, Content.content_type)
-
-# Індекс для статистики користувачів
-Index('idx_user_activity', User.is_active, User.last_activity)
-
-# Індекс для рейтингів
-Index('idx_rating_user_content', Rating.user_id, Rating.content_id)
-
-# Індекс для дуелей
-Index('idx_duel_status_voting', Duel.status, Duel.voting_ends_at)
+        return f"<BotStatistics(date={self.date}, users={self.total_users})>"
