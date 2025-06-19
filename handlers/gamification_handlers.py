@@ -1,393 +1,560 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Хендлери гейміфікації (профілі, бали, ранги) 🧠😂🔥
+🧠😂🔥 ПОВНА ГЕЙМІФІКАЦІЯ - ПРОФІЛІ, РАНГИ, ЛІДЕРБОРД 🧠😂🔥
 """
 
 import logging
 from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
 
 from aiogram import Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import (
+    Message, CallbackQuery, InlineKeyboardMarkup, 
+    InlineKeyboardButton, User as TelegramUser
+)
 
 logger = logging.getLogger(__name__)
 
-# Fallback імпорти
+# Fallback налаштування
 try:
-    from config.settings import Settings
-    settings = Settings()
+    from config.settings import settings, EMOJI
 except ImportError:
     import os
-    class FallbackSettings:
-        POINTS_FOR_DAILY_ACTIVITY = int(os.getenv("POINTS_FOR_DAILY_ACTIVITY", "2"))
-        DAILY_BROADCAST_HOUR = int(os.getenv("DAILY_BROADCAST_HOUR", "9"))
-    settings = FallbackSettings()
-
-# EMOJI константи
-EMOJI = {
-    "brain": "🧠", "laugh": "😂", "fire": "🔥", "star": "⭐", 
-    "heart": "❤️", "trophy": "🏆", "crown": "👑", "rocket": "🚀",
-    "party": "🎉", "profile": "👤", "top": "🔝", "calendar": "📅",
-    "stats": "📊", "check": "✅", "thinking": "🤔", "vs": "⚔️"
-}
-
-# Система рангів
-RANKS = {
-    0: "🤡 Новачок",
-    50: "😄 Сміхун", 
-    150: "😂 Гуморист",
-    350: "🎭 Комік",
-    750: "👑 Мастер Рофлу",
-    1500: "🏆 Король Гумору",
-    3000: "🌟 Легенда Мемів",
-    5000: "🚀 Гумористичний Геній"
-}
-
-def get_rank_by_points(points: int) -> str:
-    """Визначення рангу по балах"""
-    for min_points in sorted(RANKS.keys(), reverse=True):
-        if points >= min_points:
-            return RANKS[min_points]
-    return RANKS[0]
-
-def get_next_rank_info(points: int) -> dict:
-    """Інформація про наступний ранг"""
-    current_rank = get_rank_by_points(points)
-    
-    for min_points in sorted(RANKS.keys()):
-        if min_points > points:
-            return {
-                "next_rank": RANKS[min_points],
-                "points_needed": min_points - points,
-                "current_points": points
-            }
-    
-    return {
-        "next_rank": None,
-        "points_needed": 0,
-        "current_points": points
+    EMOJI = {
+        "brain": "🧠", "laugh": "😂", "fire": "🔥", "star": "⭐",
+        "check": "✅", "cross": "❌", "warning": "⚠️", "info": "ℹ️",
+        "crown": "👑", "rocket": "🚀", "vs": "⚔️", "calendar": "📅",
+        "profile": "👤", "trophy": "🏆", "medal": "🥇", "gem": "💎"
     }
 
-# Простий клас користувача (fallback)
-class User:
-    def __init__(self, user_id, first_name=None, username=None):
-        self.id = user_id
-        self.first_name = first_name or "Користувач"
-        self.username = username
-        self.points = 0
-        self.rank = get_rank_by_points(0)
-        self.daily_subscription = False
-        self.jokes_submitted = 0
-        self.jokes_approved = 0
-        self.memes_submitted = 0
-        self.memes_approved = 0
-        self.duels_won = 0
-        self.duels_lost = 0
-        self.last_active = datetime.now()
+# ===== КОНФІГУРАЦІЯ РАНГІВ =====
 
-# Тимчасове сховище користувачів (в продакшені - БД)
-USERS_STORAGE = {}
+RANK_SYSTEM = [
+    {"name": "🤡 Новачок", "min_points": 0, "emoji": "🤡", "description": "Тільки почали свій шлях в світі гумору"},
+    {"name": "😄 Сміхун", "min_points": 50, "emoji": "😄", "description": "Розумієте що таке смішно"},
+    {"name": "😂 Гуморист", "min_points": 150, "emoji": "😂", "description": "Вже можете розсмішити друзів"},
+    {"name": "🎭 Комік", "min_points": 350, "emoji": "🎭", "description": "Справжній майстер жартів"},
+    {"name": "👑 Мастер Рофлу", "min_points": 750, "emoji": "👑", "description": "Король місцевого стенд-апу"},
+    {"name": "🏆 Король Гумору", "min_points": 1500, "emoji": "🏆", "description": "Легенда комедійного цеху"},
+    {"name": "🌟 Легенда Мемів", "min_points": 3000, "emoji": "🌟", "description": "Ваші меми розходяться по всьому інтернету"},
+    {"name": "🚀 Гумористичний Геній", "min_points": 5000, "emoji": "🚀", "description": "Абсолютний майстер комедії"}
+]
 
-async def get_or_create_user(user_id: int, username: str = None, first_name: str = None, last_name: str = None):
-    """Отримання або створення користувача"""
-    try:
-        # Спроба отримання з БД
-        from database.database import get_or_create_user as db_get_user
-        return await db_get_user(user_id, username, first_name, last_name)
-    except ImportError:
-        # Fallback - використовуємо пам'ять
-        if user_id not in USERS_STORAGE:
-            USERS_STORAGE[user_id] = User(user_id, first_name, username)
-        return USERS_STORAGE[user_id]
-
-async def get_user_stats(user_id: int):
-    """Отримання статистики користувача"""
-    try:
-        # Спроба отримання з БД
-        from database.database import get_user_stats as db_get_stats
-        return await db_get_stats(user_id)
-    except ImportError:
-        # Fallback
-        user = await get_or_create_user(user_id)
-        return {"user": user}
-
-async def get_top_users(limit: int = 10):
-    """Отримання топ-користувачів"""
-    try:
-        # Спроба отримання з БД
-        from database.database import get_db_session
-        from database.models import User as DBUser
-        
-        with get_db_session() as session:
-            return session.query(DBUser).order_by(DBUser.points.desc()).limit(limit).all()
-    except ImportError:
-        # Fallback - сортування з пам'яті
-        sorted_users = sorted(USERS_STORAGE.values(), key=lambda u: u.points, reverse=True)
-        return sorted_users[:limit]
-
-async def toggle_daily_subscription_db(user_id: int):
-    """Перемикання підписки на щоденну розсилку"""
-    try:
-        from database.database import get_db_session
-        from database.models import User as DBUser
-        
-        with get_db_session() as session:
-            user = session.query(DBUser).filter(DBUser.id == user_id).first()
-            if user:
-                user.daily_subscription = not user.daily_subscription
-                session.commit()
-                return user.daily_subscription
-    except ImportError:
-        # Fallback
-        user = await get_or_create_user(user_id)
-        user.daily_subscription = not user.daily_subscription
-        return user.daily_subscription
+def get_rank_by_points(points: int) -> Dict[str, Any]:
+    """Отримати ранг за кількістю балів"""
+    current_rank = RANK_SYSTEM[0]
+    next_rank = None
     
-    return False
+    for i, rank in enumerate(RANK_SYSTEM):
+        if points >= rank["min_points"]:
+            current_rank = rank
+            next_rank = RANK_SYSTEM[i + 1] if i + 1 < len(RANK_SYSTEM) else None
+        else:
+            break
+    
+    return {
+        "current": current_rank,
+        "next": next_rank,
+        "progress": points - current_rank["min_points"],
+        "next_threshold": next_rank["min_points"] - points if next_rank else 0
+    }
 
-# ===== КОМАНДИ ГЕЙМІФІКАЦІЇ =====
+def get_achievement_badge(user_stats: Dict[str, Any]) -> str:
+    """Отримати значок досягнень"""
+    badges = []
+    
+    # Значки за активність
+    if user_stats.get("jokes_approved", 0) >= 10:
+        badges.append("📝 Автор")
+    if user_stats.get("reactions_given", 0) >= 100:
+        badges.append("👍 Критик")
+    if user_stats.get("duels_won", 0) >= 5:
+        badges.append("⚔️ Боєць")
+    if user_stats.get("points", 0) >= 1000:
+        badges.append("💎 Багатій")
+    
+    # Значки за час
+    if user_stats.get("days_active", 0) >= 30:
+        badges.append("📅 Ветеран")
+    if user_stats.get("daily_streak", 0) >= 7:
+        badges.append("🔥 Постійний")
+    
+    return " ".join(badges) if badges else "🆕 Початківець"
+
+# ===== ПРОФІЛЬ КОРИСТУВАЧА =====
 
 async def cmd_profile(message: Message):
-    """Команда /profile - показ профілю користувача"""
-    await show_profile(message, message.from_user.id)
+    """Команда /profile - показати профіль користувача"""
+    await show_user_profile(message, message.from_user.id)
 
-async def show_profile(message: Message, user_id: int):
-    """Показ детального профілю користувача"""
-    user_stats = await get_user_stats(user_id)
-    user_data = user_stats.get("user") if user_stats else None
-    
-    if not user_data:
-        await message.answer("❌ Користувач не знайдений!")
-        return
-    
-    # Інформація про наступний ранг
-    next_rank_info = get_next_rank_info(user_data.points)
-    
-    # Розрахунок прогресу
-    if next_rank_info["points_needed"] > 0:
-        progress_text = (
-            f"{EMOJI['rocket']} <b>До наступного рангу:</b>\n"
-            f"🎯 {next_rank_info['next_rank']}\n"
-            f"🔥 Потрібно ще: {next_rank_info['points_needed']} балів"
-        )
-    else:
-        progress_text = f"{EMOJI['crown']} <b>Максимальний ранг досягнуто!</b>"
-    
-    # Статистика активності
-    activity_stats = ""
-    if hasattr(user_data, 'jokes_submitted'):
-        approval_rate_jokes = round(user_data.jokes_approved / max(user_data.jokes_submitted, 1) * 100)
-        approval_rate_memes = round(user_data.memes_approved / max(user_data.memes_submitted, 1) * 100)
+async def show_user_profile(message: Message, user_id: int):
+    """Показати профіль користувача"""
+    try:
+        from database import get_user_by_id, get_user_stats
         
-        activity_stats = (
-            f"\n{EMOJI['stats']} <b>Активність:</b>\n"
-            f"📝 Анекдотів: {user_data.jokes_submitted} (схвалено {approval_rate_jokes}%)\n"
-            f"🖼 Мемів: {user_data.memes_submitted} (схвалено {approval_rate_memes}%)\n"
-            f"⚔️ Дуелей: {user_data.duels_won}W/{user_data.duels_lost}L"
+        # Отримати дані користувача
+        user = await get_user_by_id(user_id)
+        if not user:
+            await message.answer(
+                f"{EMOJI.get('warning', '⚠️')} Користувач не знайдений.\n"
+                f"Спробуйте надіслати /start для створення профілю."
+            )
+            return
+        
+        # Отримати статистику
+        stats = await get_user_stats(user_id)
+        
+        # Розрахувати ранг
+        rank_info = get_rank_by_points(user.points)
+        
+        # Розрахувати активність
+        days_since_registration = (datetime.utcnow() - user.created_at).days
+        days_active = max(1, days_since_registration)
+        
+        # Створити статистику
+        user_stats = {
+            "points": user.points,
+            "jokes_approved": user.jokes_approved,
+            "memes_approved": user.memes_approved,
+            "reactions_given": user.reactions_given,
+            "duels_won": user.duels_won,
+            "duels_lost": user.duels_lost,
+            "days_active": days_active,
+            "daily_streak": 0  # TODO: розрахувати streak
+        }
+        
+        # Отримати значки досягнень
+        achievements = get_achievement_badge(user_stats)
+        
+        # Створити текст профілю
+        profile_text = f"{EMOJI.get('profile', '👤')} <b>Профіль користувача</b>\n\n"
+        
+        # Основна інформація
+        profile_text += f"🎭 <b>{user.first_name or 'Невідомий'}</b>"
+        if user.username:
+            profile_text += f" (@{user.username})"
+        profile_text += f"\n"
+        
+        # Ранг та бали
+        profile_text += f"🏆 <b>Ранг:</b> {rank_info['current']['name']}\n"
+        profile_text += f"💰 <b>Бали:</b> {user.points:,}\n"
+        
+        # Прогрес до наступного рангу
+        if rank_info['next']:
+            progress_percent = (rank_info['progress'] / (rank_info['progress'] + rank_info['next_threshold'])) * 100
+            progress_bar = "█" * int(progress_percent / 10) + "░" * (10 - int(progress_percent / 10))
+            profile_text += f"📈 <b>Прогрес:</b> {progress_bar} {progress_percent:.1f}%\n"
+            profile_text += f"🎯 <b>До {rank_info['next']['name']}:</b> {rank_info['next_threshold']:,} балів\n"
+        else:
+            profile_text += f"🌟 <b>Максимальний ранг досягнуто!</b>\n"
+        
+        profile_text += "\n"
+        
+        # Досягнення
+        profile_text += f"🏅 <b>Досягнення:</b> {achievements}\n\n"
+        
+        # Статистика контенту
+        profile_text += f"📊 <b>Статистика контенту:</b>\n"
+        profile_text += f"• 📝 Жартів схвалено: {user.jokes_approved}\n"
+        profile_text += f"• 🖼 Мемів схвалено: {user.memes_approved}\n"
+        profile_text += f"• 📤 Всього надіслано: {user.jokes_submitted + user.memes_submitted}\n"
+        
+        # Статистика активності
+        profile_text += f"\n🎮 <b>Активність:</b>\n"
+        profile_text += f"• 👍 Реакцій дано: {user.reactions_given}\n"
+        profile_text += f"• ⚔️ Дуелів виграно: {user.duels_won}\n"
+        profile_text += f"• 🥊 Дуелів програно: {user.duels_lost}\n"
+        
+        # Загальна активність
+        total_duels = user.duels_won + user.duels_lost
+        win_rate = (user.duels_won / total_duels * 100) if total_duels > 0 else 0
+        
+        profile_text += f"\n📈 <b>Загальне:</b>\n"
+        profile_text += f"• 🗓 Днів в боті: {days_active}\n"
+        profile_text += f"• 🎯 Винрейт дуелів: {win_rate:.1f}%\n"
+        profile_text += f"• 📅 Реєстрація: {user.created_at.strftime('%d.%m.%Y')}\n"
+        
+        # Клавіатура профілю
+        keyboard = get_profile_keyboard(user_id)
+        
+        await message.answer(profile_text, reply_markup=keyboard)
+        
+        logger.info(f"👤 Показано профіль користувача {user_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Помилка показу профілю: {e}")
+        await message.answer(
+            f"{EMOJI.get('cross', '❌')} Помилка при завантаженні профілю.\n"
+            f"Спробуйте ще раз пізніше."
         )
-    
-    profile_text = (
-        f"{EMOJI['profile']} <b>ПРОФІЛЬ КОРИСТУВАЧА</b>\n\n"
-        f"👤 <b>Ім'я:</b> {user_data.first_name}\n"
-        f"{EMOJI['fire']} <b>Балів:</b> {user_data.points}\n"
-        f"{EMOJI['crown']} <b>Ранг:</b> {user_data.rank}\n\n"
-        f"{progress_text}"
-        f"{activity_stats}\n\n"
-        f"{EMOJI['calendar']} Щоденна розсилка: {'✅ Увімкнена' if user_data.daily_subscription else '❌ Вимкнена'}"
-    )
-    
-    # Клавіатура профілю
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=f"{EMOJI['top']} Таблиця лідерів", callback_data="show_leaderboard"),
-            InlineKeyboardButton(text=f"{EMOJI['vs']} Почати дуель", callback_data="start_duel")
-        ],
+
+def get_profile_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Клавіатура профілю"""
+    return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text=f"{'❌ Відписатись' if user_data.daily_subscription else '✅ Підписатись'} на розсилку",
-                callback_data="toggle_daily"
+                text="🏆 Таблиця лідерів",
+                callback_data="show_leaderboard"
+            ),
+            InlineKeyboardButton(
+                text="📊 Детальна статистика",
+                callback_data=f"detailed_stats_{user_id}"
             )
         ],
         [
-            InlineKeyboardButton(text=f"{EMOJI['brain']} Анекдот", callback_data="get_joke"),
-            InlineKeyboardButton(text=f"{EMOJI['laugh']} Мем", callback_data="get_meme")
-        ]
-    ])
-    
-    await message.answer(profile_text, reply_markup=keyboard)
-
-async def cmd_top(message: Message):
-    """Команда /top - таблиця лідерів"""
-    await show_leaderboard(message)
-
-async def show_leaderboard(message: Message):
-    """Показ таблиці лідерів"""
-    top_users = await get_top_users(10)
-    
-    if not top_users:
-        await message.answer("😔 Поки що немає користувачів в рейтингу!")
-        return
-    
-    leaderboard_text = f"{EMOJI['trophy']} <b>ТАБЛИЦЯ ЛІДЕРІВ ТОП-10</b>\n\n"
-    
-    medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
-    
-    for i, user in enumerate(top_users):
-        medal = medals[i] if i < len(medals) else "🏅"
-        
-        # Маскування імені для анонімності 
-        name = user.first_name or "Невідомий"
-        if len(name) > 10:
-            name = name[:8] + "..."
-        
-        leaderboard_text += (
-            f"{medal} <b>{i+1}.</b> {name}\n"
-            f"   {EMOJI['fire']} {user.points} балів | {user.rank}\n"
-        )
-        
-        if i < 2:  # Додаткова інформація для топ-3
-            if hasattr(user, 'duels_won'):
-                leaderboard_text += f"   ⚔️ Дуелей виграно: {user.duels_won}\n"
-        
-        leaderboard_text += "\n"
-    
-    # Статистика користувача
-    user_stats = await get_user_stats(message.from_user.id)
-    user_data = user_stats.get("user") if user_stats else None
-    
-    if user_data and user_data.points > 0:
-        # Знаходимо позицію користувача
-        user_position = next((i+1 for i, u in enumerate(top_users) if u.id == user_data.id), "10+")
-        
-        leaderboard_text += (
-            f"{EMOJI['star']} <b>Твоя позиція:</b>\n"
-            f"🏅 #{user_position} | {user_data.points} балів | {user_data.rank}"
-        )
-    
-    # Клавіатура дій
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=f"{EMOJI['profile']} Мій профіль", callback_data="show_profile"),
-            InlineKeyboardButton(text=f"{EMOJI['vs']} Почати дуель", callback_data="start_duel")
+            InlineKeyboardButton(
+                text="🎯 Мої досягнення",
+                callback_data=f"achievements_{user_id}"
+            ),
+            InlineKeyboardButton(
+                text="📈 Історія балів",
+                callback_data=f"points_history_{user_id}"
+            )
         ],
         [
-            InlineKeyboardButton(text=f"{EMOJI['fire']} Заробити бали", callback_data="earn_points_info"),
-            InlineKeyboardButton(text=f"🔄 Оновити", callback_data="show_leaderboard")
+            InlineKeyboardButton(
+                text="🔄 Оновити профіль",
+                callback_data=f"refresh_profile_{user_id}"
+            )
         ]
     ])
-    
-    await message.answer(leaderboard_text, reply_markup=keyboard)
 
-async def cmd_daily(message: Message):
-    """Команда /daily - управління щоденною розсилкою"""
-    await toggle_daily_subscription(message, message.from_user.id)
+# ===== ТАБЛИЦЯ ЛІДЕРІВ =====
 
-async def toggle_daily_subscription(message: Message, user_id: int):
-    """Перемикання підписки на щоденну розсилку"""
-    new_status = await toggle_daily_subscription_db(user_id)
-    
-    if new_status:
-        response_text = (
-            f"{EMOJI['check']} <b>Підписка активована!</b>\n\n"
-            f"{EMOJI['calendar']} Тепер ти будеш отримувати:\n"
-            f"• Щоденний мем о {settings.DAILY_BROADCAST_HOUR}:00\n"
-            f"• Анекдот дня\n"
-            f"• +{settings.POINTS_FOR_DAILY_ACTIVITY} балів за активність\n\n"
-            f"{EMOJI['star']} Для скасування використай /daily знову"
+async def cmd_top(message: Message):
+    """Команда /top - показати таблицю лідерів"""
+    await show_leaderboard(message)
+
+async def show_leaderboard(message: Message, page: int = 1):
+    """Показати таблицю лідерів"""
+    try:
+        from database import get_db_session
+        from database.models import User
+        from sqlalchemy import desc
+        
+        with get_db_session() as session:
+            # Отримати топ користувачів
+            users = session.query(User).order_by(desc(User.points)).limit(20).all()
+            
+            if not users:
+                await message.answer(
+                    f"{EMOJI.get('warning', '⚠️')} Поки немає користувачів в рейтингу.\n"
+                    f"Будьте першим! Збирайте бали і підніматься в ТОП!"
+                )
+                return
+            
+            # Створити текст лідерборду
+            leaderboard_text = f"{EMOJI.get('trophy', '🏆')} <b>ТАБЛИЦЯ ЛІДЕРІВ</b>\n\n"
+            
+            for i, user in enumerate(users, 1):
+                # Визначити медаль
+                if i == 1:
+                    medal = "🥇"
+                elif i == 2:
+                    medal = "🥈"
+                elif i == 3:
+                    medal = "🥉"
+                else:
+                    medal = f"{i}️⃣"
+                
+                # Отримати ранг
+                rank_info = get_rank_by_points(user.points)
+                rank_emoji = rank_info['current']['emoji']
+                
+                # Створити рядок
+                username = user.first_name or "Невідомий"
+                if len(username) > 15:
+                    username = username[:12] + "..."
+                
+                leaderboard_text += f"{medal} {rank_emoji} <b>{username}</b>\n"
+                leaderboard_text += f"    💰 {user.points:,} балів\n"
+                
+                # Додати статистику для топ-3
+                if i <= 3:
+                    total_approved = user.jokes_approved + user.memes_approved
+                    leaderboard_text += f"    📝 Контенту: {total_approved} | ⚔️ Дуелів: {user.duels_won}\n"
+                
+                leaderboard_text += "\n"
+            
+            # Додати інформацію про поточного користувача
+            current_user_id = message.from_user.id
+            current_user_position = None
+            
+            # Знайти позицію поточного користувача
+            all_users = session.query(User).order_by(desc(User.points)).all()
+            for i, user in enumerate(all_users, 1):
+                if user.id == current_user_id:
+                    current_user_position = i
+                    break
+            
+            if current_user_position:
+                leaderboard_text += f"━━━━━━━━━━━━━━━━━━━━\n"
+                leaderboard_text += f"📍 <b>Ваша позиція: #{current_user_position}</b>\n"
+                
+                current_user = session.query(User).filter(User.id == current_user_id).first()
+                if current_user:
+                    rank_info = get_rank_by_points(current_user.points)
+                    leaderboard_text += f"💰 Ваші бали: {current_user.points:,}\n"
+                    leaderboard_text += f"🏆 Ваш ранг: {rank_info['current']['name']}"
+            
+            # Клавіатура
+            keyboard = get_leaderboard_keyboard(page)
+            
+            await message.answer(leaderboard_text, reply_markup=keyboard)
+            
+            logger.info(f"🏆 Показано таблицю лідерів")
+            
+    except Exception as e:
+        logger.error(f"❌ Помилка показу лідерборду: {e}")
+        await message.answer(
+            f"{EMOJI.get('cross', '❌')} Помилка при завантаженні таблиці лідерів.\n"
+            f"Спробуйте ще раз пізніше."
         )
-    else:
-        response_text = (
-            f"{EMOJI['calendar']} <b>Підписку скасовано</b>\n\n"
-            f"😔 Ти більше не будеш отримувати щоденну розсилку\n\n"
-            f"{EMOJI['thinking']} Для відновлення використай /daily знову"
-        )
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+
+def get_leaderboard_keyboard(page: int = 1) -> InlineKeyboardMarkup:
+    """Клавіатура лідерборду"""
+    return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=f"{EMOJI['profile']} Мій профіль", callback_data="show_profile"),
-            InlineKeyboardButton(text=f"{EMOJI['brain']} Анекдот", callback_data="get_joke")
+            InlineKeyboardButton(
+                text="👤 Мій профіль",
+                callback_data="show_my_profile"
+            ),
+            InlineKeyboardButton(
+                text="🔄 Оновити ТОП",
+                callback_data="refresh_leaderboard"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="📊 ТОП по жартах",
+                callback_data="top_jokes"
+            ),
+            InlineKeyboardButton(
+                text="🖼 ТОП по мемах",
+                callback_data="top_memes"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="⚔️ ТОП дуелянтів",
+                callback_data="top_duels"
+            ),
+            InlineKeyboardButton(
+                text="🎯 ТОП тиждень",
+                callback_data="top_week"
+            )
         ]
     ])
-    
-    await message.answer(response_text, reply_markup=keyboard)
 
-# ===== CALLBACK ОБРОБНИКИ =====
+# ===== CALLBACK ХЕНДЛЕРИ =====
 
 async def callback_show_profile(callback_query: CallbackQuery):
-    """Callback для показу профілю"""
-    await show_profile(callback_query.message, callback_query.from_user.id)
+    """Показати профіль через callback"""
+    user_id = callback_query.from_user.id
+    await show_user_profile(callback_query.message, user_id)
     await callback_query.answer()
 
 async def callback_show_leaderboard(callback_query: CallbackQuery):
-    """Callback для показу таблиці лідерів"""
+    """Показати лідерборд через callback"""
     await show_leaderboard(callback_query.message)
     await callback_query.answer()
 
-async def callback_toggle_daily(callback_query: CallbackQuery):
-    """Callback для перемикання щоденної розсилки"""
-    await toggle_daily_subscription(callback_query.message, callback_query.from_user.id)
-    await callback_query.answer()
+async def callback_refresh_profile(callback_query: CallbackQuery):
+    """Оновити профіль"""
+    data_parts = callback_query.data.split('_')
+    if len(data_parts) >= 3:
+        user_id = int(data_parts[2])
+        await show_user_profile(callback_query.message, user_id)
+        await callback_query.answer("✅ Профіль оновлено!")
+    else:
+        await callback_query.answer("❌ Помилка даних", show_alert=True)
 
-async def callback_earn_points_info(callback_query: CallbackQuery):
-    """Callback з інформацією про заробіток балів"""
-    info_text = (
-        f"{EMOJI['fire']} <b>ЯК ЗАРОБИТИ БАЛИ:</b>\n\n"
-        f"{EMOJI['brain']} <b>+1 бал</b> - за перегляд мему/анекдоту\n"
-        f"{EMOJI['heart']} <b>+5 балів</b> - за лайк контенту\n"
-        f"{EMOJI['fire']} <b>+10 балів</b> - за надісланий жарт\n"
-        f"{EMOJI['check']} <b>+20 балів</b> - якщо жарт схвалено\n"
-        f"{EMOJI['trophy']} <b>+50 балів</b> - якщо жарт у ТОПі\n"
-        f"{EMOJI['vs']} <b>+15 балів</b> - за перемогу в дуелі\n"
-        f"{EMOJI['calendar']} <b>+2 бали</b> - за щоденну активність\n\n"
-        f"{EMOJI['rocket']} <b>Ранги:</b>\n"
-        f"🤡 Новачок (0+) → 😄 Сміхун (50+) → 😂 Гуморист (150+)\n"
-        f"🎭 Комік (350+) → 👑 Мастер (750+) → 🏆 Король (1500+)\n"
-        f"🌟 Легенда (3000+) → 🚀 Геній (5000+)\n\n"
-        f"{EMOJI['party']} <b>Будь активним і ставай легендою гумору!</b>"
-    )
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=f"{EMOJI['fire']} Надіслати жарт", callback_data="submit_content"),
-            InlineKeyboardButton(text=f"{EMOJI['vs']} Почати дуель", callback_data="start_duel")
-        ],
-        [
-            InlineKeyboardButton(text=f"{EMOJI['profile']} Мій профіль", callback_data="show_profile")
-        ]
-    ])
-    
-    await callback_query.message.answer(info_text, reply_markup=keyboard)
-    await callback_query.answer()
+async def callback_refresh_leaderboard(callback_query: CallbackQuery):
+    """Оновити лідерборд"""
+    await show_leaderboard(callback_query.message)
+    await callback_query.answer("✅ Лідерборд оновлено!")
 
-async def callback_start_duel(callback_query: CallbackQuery):
-    """Callback для початку дуелі"""
-    await callback_query.message.answer(
-        f"{EMOJI['vs']} <b>Дуель жартів!</b>\n\n"
-        f"{EMOJI['fire']} Щоб почати дуель, використай команду:\n"
-        f"<code>/duel</code>\n\n"
-        f"{EMOJI['brain']} Як це працює:\n"
-        f"1. Ти надсилаєш свій жарт\n"
-        f"2. Бот знаходить опонента\n" 
-        f"3. Інші користувачі голосують\n"
-        f"4. Переможець отримує +15 балів!\n\n"
-        f"{EMOJI['thinking']} <b>Готовий до батлу?</b>"
-    )
-    await callback_query.answer()
+async def callback_detailed_stats(callback_query: CallbackQuery):
+    """Детальна статистика користувача"""
+    data_parts = callback_query.data.split('_')
+    if len(data_parts) >= 3:
+        user_id = int(data_parts[2])
+        await show_detailed_stats(callback_query.message, user_id)
+        await callback_query.answer()
+    else:
+        await callback_query.answer("❌ Помилка даних", show_alert=True)
+
+async def show_detailed_stats(message: Message, user_id: int):
+    """Показати детальну статистику"""
+    try:
+        from database import get_user_by_id, get_db_session
+        from database.models import Content, Rating
+        from sqlalchemy import func, and_
+        
+        user = await get_user_by_id(user_id)
+        if not user:
+            await message.answer("❌ Користувач не знайдений")
+            return
+        
+        with get_db_session() as session:
+            # Статистика контенту
+            total_content = session.query(Content).filter(Content.author_id == user_id).count()
+            approved_content = session.query(Content).filter(
+                and_(Content.author_id == user_id, Content.status == 'APPROVED')
+            ).count()
+            
+            # Статистика переглядів
+            total_views = session.query(func.sum(Content.views)).filter(
+                and_(Content.author_id == user_id, Content.status == 'APPROVED')
+            ).scalar() or 0
+            
+            # Статистика лайків
+            total_likes = session.query(func.sum(Content.likes)).filter(
+                and_(Content.author_id == user_id, Content.status == 'APPROVED')
+            ).scalar() or 0
+            
+            # Статистика рейтингів
+            ratings_given = session.query(Rating).filter(Rating.user_id == user_id).count()
+            
+            # Створити текст статистики
+            stats_text = f"📊 <b>Детальна статистика</b>\n\n"
+            stats_text += f"👤 <b>{user.first_name or 'Невідомий'}</b>\n\n"
+            
+            # Контент
+            stats_text += f"📝 <b>Контент:</b>\n"
+            stats_text += f"• Всього надіслано: {total_content}\n"
+            stats_text += f"• Схвалено: {approved_content}\n"
+            stats_text += f"• Відсоток схвалення: {(approved_content/total_content*100):.1f}%\n" if total_content > 0 else "• Відсоток схвалення: 0%\n"
+            stats_text += f"• Всього переглядів: {total_views:,}\n"
+            stats_text += f"• Всього лайків: {total_likes:,}\n\n"
+            
+            # Активність
+            stats_text += f"🎮 <b>Активність:</b>\n"
+            stats_text += f"• Реакцій дано: {ratings_given}\n"
+            stats_text += f"• Дуелів виграно: {user.duels_won}\n"
+            stats_text += f"• Дуелів програно: {user.duels_lost}\n"
+            
+            # Розрахунки
+            total_duels = user.duels_won + user.duels_lost
+            win_rate = (user.duels_won / total_duels * 100) if total_duels > 0 else 0
+            avg_views = (total_views / approved_content) if approved_content > 0 else 0
+            
+            stats_text += f"• Винрейт дуелів: {win_rate:.1f}%\n"
+            stats_text += f"• Середньо переглядів на контент: {avg_views:.1f}\n\n"
+            
+            # Бали
+            stats_text += f"💰 <b>Бали:</b>\n"
+            stats_text += f"• Поточний баланс: {user.points:,}\n"
+            
+            # Прогнозовані бали
+            estimated_content_points = approved_content * 30  # 10 за подачу + 20 за схвалення
+            estimated_reaction_points = ratings_given * 5
+            estimated_duel_points = user.duels_won * 15
+            
+            stats_text += f"• Орієнтовно за контент: {estimated_content_points}\n"
+            stats_text += f"• Орієнтовно за реакції: {estimated_reaction_points}\n"
+            stats_text += f"• Орієнтовно за дуелі: {estimated_duel_points}\n"
+            
+            await message.answer(stats_text)
+            
+    except Exception as e:
+        logger.error(f"❌ Помилка детальної статистики: {e}")
+        await message.answer("❌ Помилка завантаження детальної статистики")
+
+async def callback_achievements(callback_query: CallbackQuery):
+    """Показати досягнення"""
+    data_parts = callback_query.data.split('_')
+    if len(data_parts) >= 2:
+        user_id = int(data_parts[1])
+        await show_achievements(callback_query.message, user_id)
+        await callback_query.answer()
+    else:
+        await callback_query.answer("❌ Помилка даних", show_alert=True)
+
+async def show_achievements(message: Message, user_id: int):
+    """Показати досягнення користувача"""
+    try:
+        from database import get_user_by_id
+        
+        user = await get_user_by_id(user_id)
+        if not user:
+            await message.answer("❌ Користувач не знайдений")
+            return
+        
+        achievements_text = f"🏅 <b>Досягнення</b>\n\n"
+        achievements_text += f"👤 <b>{user.first_name or 'Невідомий'}</b>\n\n"
+        
+        # Список досягнень
+        achievements = []
+        
+        # Досягнення за контент
+        if user.jokes_approved >= 1:
+            achievements.append({"name": "📝 Перший жарт", "desc": "Схвалено перший жарт"})
+        if user.jokes_approved >= 10:
+            achievements.append({"name": "😂 Жартівник", "desc": "Схвалено 10+ жартів"})
+        if user.jokes_approved >= 50:
+            achievements.append({"name": "🎭 Комедіант", "desc": "Схвалено 50+ жартів"})
+        
+        # Досягнення за мемы
+        if user.memes_approved >= 1:
+            achievements.append({"name": "🖼 Перший мем", "desc": "Схвалено перший мем"})
+        if user.memes_approved >= 10:
+            achievements.append({"name": "🔥 Мемолорд", "desc": "Схвалено 10+ мемів"})
+        
+        # Досягнення за дуелі
+        if user.duels_won >= 1:
+            achievements.append({"name": "⚔️ Перша перемога", "desc": "Виграно перший дуель"})
+        if user.duels_won >= 10:
+            achievements.append({"name": "🏆 Дуелянт", "desc": "Виграно 10+ дуелів"})
+        if user.duels_won >= 50:
+            achievements.append({"name": "👑 Чемпіон", "desc": "Виграно 50+ дуелів"})
+        
+        # Досягнення за бали
+        if user.points >= 100:
+            achievements.append({"name": "💰 Перша сотня", "desc": "Зібрано 100+ балів"})
+        if user.points >= 1000:
+            achievements.append({"name": "💎 Тисячник", "desc": "Зібрано 1000+ балів"})
+        if user.points >= 5000:
+            achievements.append({"name": "🚀 Мільйонер", "desc": "Зібрано 5000+ балів"})
+        
+        # Досягнення за активність
+        if user.reactions_given >= 50:
+            achievements.append({"name": "👍 Активний критик", "desc": "Дано 50+ реакцій"})
+        if user.reactions_given >= 200:
+            achievements.append({"name": "🎯 Супер критик", "desc": "Дано 200+ реакцій"})
+        
+        # Показати досягнення
+        if achievements:
+            for achievement in achievements:
+                achievements_text += f"{achievement['name']}\n"
+                achievements_text += f"<i>{achievement['desc']}</i>\n\n"
+        else:
+            achievements_text += "Досягнень поки немає.\nПочніть збирати бали щоб отримати перші нагороди!"
+        
+        await message.answer(achievements_text)
+        
+    except Exception as e:
+        logger.error(f"❌ Помилка показу досягнень: {e}")
+        await message.answer("❌ Помилка завантаження досягнень")
+
+# ===== РЕЄСТРАЦІЯ ХЕНДЛЕРІВ =====
 
 def register_gamification_handlers(dp: Dispatcher):
-    """Реєстрація хендлерів гейміфікації"""
+    """Реєстрація всіх хендлерів гейміфікації"""
     
     # Команди
     dp.message.register(cmd_profile, Command("profile"))
     dp.message.register(cmd_top, Command("top"))
-    dp.message.register(cmd_daily, Command("daily"))
     
     # Callback запити
     dp.callback_query.register(callback_show_profile, F.data == "show_profile")
+    dp.callback_query.register(callback_show_profile, F.data == "show_my_profile")
     dp.callback_query.register(callback_show_leaderboard, F.data == "show_leaderboard")
-    dp.callback_query.register(callback_toggle_daily, F.data == "toggle_daily")
-    dp.callback_query.register(callback_earn_points_info, F.data == "earn_points_info")
-    dp.callback_query.register(callback_start_duel, F.data == "start_duel")
+    dp.callback_query.register(callback_refresh_profile, F.data.startswith("refresh_profile_"))
+    dp.callback_query.register(callback_refresh_leaderboard, F.data == "refresh_leaderboard")
+    dp.callback_query.register(callback_detailed_stats, F.data.startswith("detailed_stats_"))
+    dp.callback_query.register(callback_achievements, F.data.startswith("achievements_"))
     
-    logger.info("✅ Gamification handlers зареєстровані")
+    logger.info("✅ Хендлери гейміфікації зареєстровано")

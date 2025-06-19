@@ -1,17 +1,148 @@
-# Ukrainian Telegram Bot Requirements
+# ===== ОСНОВНІ ЗАЛЕЖНОСТІ =====
 
-aiogram>=3.4.0
+# Telegram Bot Framework
+aiogram>=3.4.0,<4.0.0
+
+# База даних
+SQLAlchemy>=2.0.0,<3.0.0
+psycopg2-binary>=2.9.0
+alembic>=1.13.0
+
+# Асинхронність
+asyncio-throttle>=1.0.2
 aiofiles>=23.0.0
 aiohttp>=3.9.0
-SQLAlchemy>=2.0.0
-alembic>=1.13.0
-asyncpg>=0.29.0
-psycopg2-binary>=2.9.0
+
+# Планувальник задач
 APScheduler>=3.10.0
-openai>=1.6.0
-python-dotenv>=1.0.0
-pydantic>=2.5.0
-python-dateutil>=2.8.0
 pytz>=2023.3
+
+# Кешування (опціонально)
+redis>=5.0.0
+aioredis>=2.0.0
+
+# ===== ОБРОБКА ДАНИХ =====
+
+# Робота з JSON та датами
+python-dateutil>=2.8.0
+orjson>=3.9.0
+
+# Логування та моніторинг
+structlog>=23.0.0
+colorlog>=6.7.0
+
+# ===== AI ТА ГЕНЕРАЦІЯ КОНТЕНТУ =====
+
+# OpenAI для генерації контенту
+openai>=1.0.0
+
+# Обробка тексту
+nltk>=3.8.0
+textblob>=0.17.0
+
+# ===== ВЕБ ТА API =====
+
+# Веб-сервер для webhook
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# HTTP клієнт
+httpx>=0.25.0
+
+# ===== МОНІТОРИНГ ТА МЕТРИКИ =====
+
+# Prometheus метрики
+prometheus-client>=0.19.0
+
+# Здоров'я системи
+psutil>=5.9.0
+
+# ===== БЕЗПЕКА =====
+
+# Хешування та криптографія
+bcrypt>=4.1.0
+cryptography>=41.0.0
+
+# JWT токени
+PyJWT>=2.8.0
+
+# ===== УТИЛІТИ =====
+
+# Робота з файлами
+Pillow>=10.1.0
+python-magic>=0.4.27
+
+# Валідація даних
+pydantic>=2.5.0
+
+# Конфігурація
+python-decouple>=3.8
+pyyaml>=6.0.1
+
+# ===== ТЕСТУВАННЯ ТА РОЗРОБКА =====
+
+# Тестування
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Форматування коду
+black>=23.0.0
+isort>=5.12.0
+
+# Лінтинг
+flake8>=6.1.0
+mypy>=1.7.0
+
+# ===== СПЕЦИФІЧНІ ДЛЯ ПРОЕКТУ =====
+
+# Робота з емодзі
 emoji>=2.8.0
-cryptography>=42.0.0
+
+# Обробка зображень
+qrcode>=7.4.2
+
+# Парсинг та scraping (для контенту)
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# ===== DEPLOYMENT ТА PRODUCTION =====
+
+# WSGI/ASGI сервери
+gunicorn>=21.2.0
+
+# Робота з оточенням
+python-dotenv>=1.0.0
+
+# Backup та архівування
+zipfile-deflate64>=0.2.0
+
+# ===== ОПЦІОНАЛЬНІ ЗАЛЕЖНОСТІ =====
+
+# Машинне навчання (для покращення контенту)
+scikit-learn>=1.3.0
+
+# Графіки та візуалізація
+matplotlib>=3.8.0
+plotly>=5.17.0
+
+# Робота з PDF
+reportlab>=4.0.0
+
+# ===== ВЕРСІЇ ДЛЯ СУМІСНОСТІ =====
+
+# Python базові бібліотеки
+requests>=2.31.0
+urllib3>=2.1.0
+
+# Async підтримка
+asyncpg>=0.29.0  # Для PostgreSQL async
+
+# Серіалізація
+msgpack>=1.0.7
+
+# ===== МІНІМАЛЬНІ ВИМОГИ =====
+# Python >= 3.9
+# PostgreSQL >= 12 (або SQLite для розробки)
+# RAM >= 512MB
+# Disk >= 1GB

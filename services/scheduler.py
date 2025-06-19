@@ -1,430 +1,462 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 Планувальник задач для автоматичної розсилки 🧠😂🔥
+🧠😂🔥 ПРОФЕСІЙНИЙ ПЛАНУВАЛЬНИК ЗАДАЧ 🧠😂🔥
+Щоденна розсилка, очищення даних, статистика та інше
 """
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import List
-
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-
-from config.settings import EMOJI, settings, TIME_GREETINGS
-from database.database import get_db_session, get_random_joke, get_random_meme, update_user_points
-from database.models import User, Content, ContentStatus, Duel, DuelStatus
+from datetime import datetime, timedelta, time
+from typing import List, Dict, Any, Optional
+import pytz
 
 logger = logging.getLogger(__name__)
 
+# Fallback налаштування
+try:
+    from config.settings import settings
+    DAILY_BROADCAST_HOUR = getattr(settings, 'DAILY_BROADCAST_HOUR', 9)
+    DAILY_BROADCAST_MINUTE = getattr(settings, 'DAILY_BROADCAST_MINUTE', 0)
+    TIMEZONE = getattr(settings, 'TIMEZONE', 'Europe/Kiev')
+    POINTS_FOR_DAILY_ACTIVITY = getattr(settings, 'POINTS_FOR_DAILY_ACTIVITY', 2)
+except ImportError:
+    import os
+    DAILY_BROADCAST_HOUR = int(os.getenv("DAILY_BROADCAST_HOUR", "9"))
+    DAILY_BROADCAST_MINUTE = int(os.getenv("DAILY_BROADCAST_MINUTE", "0"))
+    TIMEZONE = os.getenv("TIMEZONE", "Europe/Kiev")
+    POINTS_FOR_DAILY_ACTIVITY = int(os.getenv("POINTS_FOR_DAILY_ACTIVITY", "2"))
+
+EMOJI = {
+    "calendar": "📅", "fire": "🔥", "star": "⭐", "gem": "💎",
+    "crown": "👑", "rocket": "🚀", "heart": "❤️", "wave": "👋"
+}
+
 class SchedulerService:
-    """Сервіс планувальника для автоматичних задач"""
+    """Сервіс планувальника задач"""
     
     def __init__(self, bot):
         self.bot = bot
-        self.scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
+        self.is_running = False
+        self.tasks = []
+        self.timezone = pytz.timezone(TIMEZONE)
+        self.last_daily_broadcast = None
         
     async def start(self):
-        """Запуск планувальника з усіма задачами"""
-        try:
-            # Щоденна розсилка підписникам
-            self.scheduler.add_job(
-                self.daily_broadcast,
-                CronTrigger(
-                    hour=settings.DAILY_BROADCAST_HOUR,
-                    minute=settings.DAILY_BROADCAST_MINUTE
-                ),
-                id='daily_broadcast',
-                name='Щоденна розсилка контенту',
-                max_instances=1
-            )
-            
-            # Завершення просрочених дуелей (кожні 5 хвилин)
-            self.scheduler.add_job(
-                self.finish_expired_duels,
-                CronTrigger(minute='*/5'),
-                id='finish_duels',
-                name='Завершення просрочених дуелей',
-                max_instances=1
-            )
-            
-            # Щоденне нагадування неактивним користувачам (о 19:00)
-            self.scheduler.add_job(
-                self.inactive_users_reminder,
-                CronTrigger(hour=19, minute=0),
-                id='inactive_reminder',
-                name='Нагадування неактивним користувачам',
-                max_instances=1
-            )
-            
-            # Тижневі нагороди топ-користувачам (неділя о 20:00)
-            self.scheduler.add_job(
-                self.weekly_top_rewards,
-                CronTrigger(day_of_week=6, hour=20, minute=0),  # Неділя
-                id='weekly_rewards',
-                name='Тижневі нагороди',
-                max_instances=1
-            )
-            
-            self.scheduler.start()
-            logger.info("🔥 Планувальник запущено з усіма задачами!")
-            
-        except Exception as e:
-            logger.error(f"Помилка запуску планувальника: {e}")
-            raise
+        """Запустити планувальник"""
+        if self.is_running:
+            logger.warning("⚠️ Планувальник вже запущений")
+            return
+        
+        self.is_running = True
+        logger.info("📅 Запуск планувальника задач...")
+        
+        # Створити задачі
+        self.tasks = [
+            asyncio.create_task(self._daily_broadcast_loop()),
+            asyncio.create_task(self._hourly_maintenance_loop()),
+            asyncio.create_task(self._duel_completion_check_loop()),
+            asyncio.create_task(self._statistics_update_loop())
+        ]
+        
+        logger.info("✅ Планувальник задач запущено")
     
     async def stop(self):
-        """Зупинка планувальника"""
-        if self.scheduler.running:
-            self.scheduler.shutdown()
-            logger.info("⏹️ Планувальник зупинено")
-    
-    async def daily_broadcast(self):
-        """Щоденна розсилка контенту підписникам"""
-        logger.info("📅 Початок щоденної розсилки...")
+        """Зупинити планувальник"""
+        if not self.is_running:
+            return
         
+        self.is_running = False
+        logger.info("🛑 Зупинка планувальника задач...")
+        
+        # Скасувати всі задачі
+        for task in self.tasks:
+            task.cancel()
+        
+        # Дочекатися завершення
+        await asyncio.gather(*self.tasks, return_exceptions=True)
+        
+        logger.info("✅ Планувальник задач зупинено")
+    
+    # ===== ЩОДЕННА РОЗСИЛКА =====
+    
+    async def _daily_broadcast_loop(self):
+        """Цикл щоденної розсилки"""
+        logger.info(f"📅 Розсилка налаштована на {DAILY_BROADCAST_HOUR:02d}:{DAILY_BROADCAST_MINUTE:02d}")
+        
+        while self.is_running:
+            try:
+                await self._check_daily_broadcast()
+                await asyncio.sleep(60)  # Перевіряємо кожну хвилину
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"❌ Помилка циклу розсилки: {e}")
+                await asyncio.sleep(300)  # 5 хвилин при помилці
+    
+    async def _check_daily_broadcast(self):
+        """Перевірити чи час для щоденної розсилки"""
+        now = datetime.now(self.timezone)
+        
+        # Перевірити чи правильний час
+        if now.hour != DAILY_BROADCAST_HOUR or now.minute != DAILY_BROADCAST_MINUTE:
+            return
+        
+        # Перевірити чи вже була розсилка сьогодні
+        today = now.date()
+        if self.last_daily_broadcast == today:
+            return
+        
+        logger.info("📢 Починаю щоденну розсилку...")
+        await self._perform_daily_broadcast()
+        self.last_daily_broadcast = today
+    
+    async def _perform_daily_broadcast(self):
+        """Виконати щоденну розсилку"""
         try:
-            # Отримання підписників
-            subscribers = await self.get_daily_subscribers()
+            from database import get_db_session, get_random_approved_content, update_user_points
+            from database.models import User
             
-            if not subscribers:
-                logger.info("📭 Немає підписників для щоденної розсилки")
-                return
-            
-            # Отримання контенту дня
-            daily_joke = await get_random_joke()
-            daily_meme = await get_random_meme()
+            # Отримати випадковий контент
+            daily_joke = await get_random_approved_content("JOKE")
+            daily_meme = await get_random_approved_content("MEME")
             
             if not daily_joke and not daily_meme:
-                logger.warning("📭 Немає контенту для щоденної розсилки")
+                logger.warning("⚠️ Немає контенту для щоденної розсилки")
                 return
             
-            # Визначення привітання за часом
-            current_hour = datetime.now().hour
-            if 6 <= current_hour < 12:
-                greeting = f"{EMOJI['fire']} Доброго ранку!"
-                mood_text = "Заряджайся позитивом на весь день!"
-            elif 12 <= current_hour < 18:
-                greeting = f"{EMOJI['laugh']} Гарного дня!"
-                mood_text = "Час для гумористичної паузи!"
-            else:
-                greeting = f"{EMOJI['brain']} Доброго вечора!"
-                mood_text = "Розслабся з хорошим гумором!"
+            # Отримати підписаних користувачів
+            with get_db_session() as session:
+                subscribed_users = session.query(User).filter(
+                    User.daily_subscription == True
+                ).all()
             
-            # Статистика для мотивації
-            stats_text = await self.get_motivation_stats()
+            if not subscribed_users:
+                logger.info("📭 Немає підписаних користувачів")
+                return
             
+            logger.info(f"📬 Розсилка для {len(subscribed_users)} користувачів")
+            
+            # Підготувати повідомлення
+            broadcast_text = self._prepare_daily_message(daily_joke, daily_meme)
+            
+            # Відправити всім підписаним
             success_count = 0
-            for subscriber in subscribers:
+            for user in subscribed_users:
                 try:
-                    # Персоналізоване привітання
-                    user_name = subscriber.first_name or "Друже"
-                    personal_greeting = f"{greeting}\n\n{EMOJI['star']} {user_name}, {mood_text}\n\n"
+                    await self.bot.send_message(user.id, broadcast_text)
                     
-                    # Основне повідомлення з анекдотом
-                    if daily_joke:
-                        joke_message = (
-                            f"{personal_greeting}"
-                            f"{EMOJI['brain']} <b>АНЕКДОТ ДНЯ:</b>\n\n"
-                            f"{daily_joke.text}\n\n"
-                            f"{stats_text}\n\n"
-                            f"{EMOJI['like']} Оціни та отримай +{settings.POINTS_FOR_REACTION} балів!"
-                        )
-                        
-                        # Клавіатура для швидких дій
-                        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                            [
-                                InlineKeyboardButton(
-                                    text=f"{EMOJI['like']} Подобається", 
-                                    callback_data=f"like_content:{daily_joke.id}"
-                                ),
-                                InlineKeyboardButton(
-                                    text=f"{EMOJI['laugh']} Ще мем", 
-                                    callback_data="get_meme"
-                                )
-                            ],
-                            [
-                                InlineKeyboardButton(
-                                    text=f"{EMOJI['fire']} Мій профіль", 
-                                    callback_data="show_profile"
-                                ),
-                                InlineKeyboardButton(
-                                    text=f"{EMOJI['vs']} Дуель", 
-                                    callback_data="start_duel"
-                                )
-                            ]
-                        ])
-                        
-                        await self.bot.send_message(
-                            subscriber.id,
-                            joke_message,
-                            reply_markup=keyboard
-                        )
-                        
-                        await asyncio.sleep(0.5)  # Пауза між повідомленнями
-                    
-                    # Додаткове повідомлення з мемом (якщо є)
-                    if daily_meme and daily_meme.file_id:
-                        meme_caption = (
-                            f"{EMOJI['laugh']} <b>МЕМ ДНЯ:</b>\n\n"
-                            f"{daily_meme.text}\n\n"
-                            f"{EMOJI['fire']} Переглядів: {daily_meme.views}"
-                        )
-                        
-                        try:
-                            await self.bot.send_photo(
-                                subscriber.id,
-                                photo=daily_meme.file_id,
-                                caption=meme_caption
-                            )
-                        except:
-                            # Якщо не вдалося відправити фото, відправляємо текст
-                            await self.bot.send_message(subscriber.id, meme_caption)
-                        
-                        await asyncio.sleep(0.5)
-                    
-                    # Нарахування балів за щоденну активність
-                    await update_user_points(
-                        subscriber.id, 
-                        settings.POINTS_FOR_DAILY_ACTIVITY, 
-                        "щоденна розсилка"
-                    )
+                    # Нарахувати бали за щоденну активність
+                    await update_user_points(user.id, POINTS_FOR_DAILY_ACTIVITY, "щоденна розсилка")
                     
                     success_count += 1
+                    await asyncio.sleep(0.1)  # Невелика затримка між повідомленнями
                     
                 except Exception as e:
-                    logger.error(f"Помилка надсилання користувачу {subscriber.id}: {e}")
-                    continue
+                    logger.warning(f"⚠️ Не вдалося надіслати користувачу {user.id}: {e}")
             
-            logger.info(f"📤 Щоденну розсилку надіслано {success_count}/{len(subscribers)} користувачів")
+            logger.info(f"✅ Щоденна розсилка завершена: {success_count}/{len(subscribed_users)}")
             
-            # Повідомлення адміністратору про результат
-            try:
-                await self.bot.send_message(
-                    settings.ADMIN_ID,
-                    f"{EMOJI['check']} <b>Щоденна розсилка завершена!</b>\n\n"
-                    f"{EMOJI['profile']} Підписників: {len(subscribers)}\n"
-                    f"{EMOJI['fire']} Успішно надіслано: {success_count}\n"
-                    f"{EMOJI['cross']} Помилок: {len(subscribers) - success_count}"
-                )
-            except:
-                pass
+            # Записати статистику
+            await self._record_broadcast_stats(len(subscribed_users), success_count)
             
         except Exception as e:
-            logger.error(f"Помилка щоденної розсилки: {e}")
+            logger.error(f"❌ Помилка щоденної розсилки: {e}")
     
-    async def get_daily_subscribers(self) -> List[User]:
-        """Отримання списку підписників щоденної розсилки"""
-        with get_db_session() as session:
-            return session.query(User).filter(
-                User.daily_subscription == True
-            ).all()
+    def _prepare_daily_message(self, joke=None, meme=None):
+        """Підготувати повідомлення для щоденної розсилки"""
+        now = datetime.now(self.timezone)
+        
+        # Контекстне привітання
+        if now.hour < 12:
+            greeting = "Доброго ранку"
+            greeting_emoji = "🌅"
+        elif now.hour < 18:
+            greeting = "Гарного дня"
+            greeting_emoji = "☀️"
+        else:
+            greeting = "Доброго вечора"
+            greeting_emoji = "🌆"
+        
+        message = f"{greeting_emoji} <b>{greeting}!</b>\n\n"
+        message += f"{EMOJI['calendar']} <b>Щоденна порція гумору</b>\n"
+        message += f"📅 {now.strftime('%d.%m.%Y')}\n\n"
+        
+        # Додати жарт
+        if joke:
+            message += f"{EMOJI['fire']} <b>Жарт дня:</b>\n"
+            message += f"<i>{joke.text}</i>\n\n"
+        
+        # Додати мем
+        if meme:
+            message += f"{EMOJI['rocket']} <b>Мем дня:</b>\n"
+            message += f"<i>{meme.text}</i>\n\n"
+        
+        message += f"{EMOJI['gem']} <b>+{POINTS_FOR_DAILY_ACTIVITY} балів за щоденну активність!</b>\n\n"
+        
+        # Заклик до дії
+        message += f"🎮 Не забудьте:\n"
+        message += f"• Переглянути нові меми /meme\n"
+        message += f"• Почитати анекдоти /anekdot\n"
+        message += f"• Взяти участь в дуелях /duel\n"
+        message += f"• Подивитися свій прогрес /profile\n\n"
+        
+        message += f"{EMOJI['heart']} Гарного дня та багато сміху!"
+        
+        return message
     
-    async def get_motivation_stats(self) -> str:
-        """Отримання мотиваційної статистики"""
-        with get_db_session() as session:
-            total_users = session.query(User).count()
-            users_with_points = session.query(User).filter(User.points > 0).count()
-            active_duels = session.query(Duel).filter(Duel.status == DuelStatus.ACTIVE).count()
-            
-            motivational_phrases = [
-                f"{EMOJI['rocket']} Сьогодні {total_users} людей сміються разом з нами!",
-                f"{EMOJI['fire']} Вже {users_with_points} користувачів заробили бали!",
-                f"{EMOJI['vs']} Зараз йде {active_duels} дуелей жартів!",
-                f"{EMOJI['star']} Приєднуйся до спільноти гумористів!",
-                f"{EMOJI['trophy']} Кожен день - нова можливість посміятися!",
-                f"{EMOJI['heart']} Гумор об'єднує нас всіх!"
-            ]
-            
-            import random
-            return random.choice(motivational_phrases)
-    
-    async def finish_expired_duels(self):
-        """Завершення просрочених дуелей"""
+    async def _record_broadcast_stats(self, total_users: int, successful_sends: int):
+        """Записати статистику розсилки"""
         try:
-            from handlers.duel_handlers import finish_duel
+            from database import get_db_session
+            
+            # Тут можна було б записати в окрему таблицю статистики розсилок
+            logger.info(f"📊 Статистика розсилки: {successful_sends}/{total_users} ({successful_sends/total_users*100:.1f}%)")
+            
+        except Exception as e:
+            logger.error(f"❌ Помилка запису статистики розсилки: {e}")
+    
+    # ===== ЩОГОДИННЕ ОБСЛУГОВУВАННЯ =====
+    
+    async def _hourly_maintenance_loop(self):
+        """Цикл щогодинного обслуговування"""
+        while self.is_running:
+            try:
+                await self._perform_hourly_maintenance()
+                await asyncio.sleep(3600)  # Кожну годину
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"❌ Помилка щогодинного обслуговування: {e}")
+                await asyncio.sleep(1800)  # 30 хвилин при помилці
+    
+    async def _perform_hourly_maintenance(self):
+        """Виконати щогодинне обслуговування"""
+        try:
+            logger.debug("🔧 Щогодинне обслуговування...")
+            
+            # Очистити старі дані
+            await self._cleanup_old_data()
+            
+            # Оновити статистику
+            await self._update_statistics()
+            
+            # Перевірити завершені дуелі
+            await self._cleanup_completed_duels()
+            
+            logger.debug("✅ Щогодинне обслуговування завершено")
+            
+        except Exception as e:
+            logger.error(f"❌ Помилка щогодинного обслуговування: {e}")
+    
+    async def _cleanup_old_data(self):
+        """Очистити старі дані"""
+        try:
+            from database import get_db_session
+            from database.models import Duel, Rating
+            
+            # Видалити старі завершені дуелі (старші 7 днів)
+            week_ago = datetime.utcnow() - timedelta(days=7)
             
             with get_db_session() as session:
-                expired_duels = session.query(Duel).filter(
-                    Duel.status == DuelStatus.ACTIVE,
-                    Duel.voting_ends_at <= datetime.utcnow()
+                old_duels = session.query(Duel).filter(
+                    Duel.status == 'COMPLETED',
+                    Duel.completed_at < week_ago
+                ).delete()
+                
+                if old_duels > 0:
+                    session.commit()
+                    logger.info(f"🗑️ Видалено {old_duels} старих дуелів")
+            
+        except Exception as e:
+            logger.error(f"❌ Помилка очищення даних: {e}")
+    
+    async def _update_statistics(self):
+        """Оновити статистику"""
+        try:
+            from database import update_bot_statistics
+            await update_bot_statistics()
+            logger.debug("📊 Статистика оновлена")
+            
+        except Exception as e:
+            logger.error(f"❌ Помилка оновлення статистики: {e}")
+    
+    async def _cleanup_completed_duels(self):
+        """Очистити завершені дуелі"""
+        try:
+            from database import get_db_session
+            from database.models import Duel
+            
+            with get_db_session() as session:
+                # Знайти "заморожені" дуелі (активні більше 24 годин)
+                day_ago = datetime.utcnow() - timedelta(hours=24)
+                
+                frozen_duels = session.query(Duel).filter(
+                    Duel.status == 'ACTIVE',
+                    Duel.created_at < day_ago
                 ).all()
                 
-                for duel in expired_duels:
-                    try:
-                        result = await finish_duel(duel.id)
-                        
-                        if result:
-                            # Повідомлення учасникам про результат
-                            result_text = (
-                                f"{EMOJI['vs']} <b>ДУЕЛЬ #{duel.id} ЗАВЕРШЕНА!</b>\n\n"
-                                f"{EMOJI['fire']} Жарт А: {result['initiator_votes']} голосів\n"
-                                f"{EMOJI['brain']} Жарт Б: {result['opponent_votes']} голосів\n\n"
-                            )
-                            
-                            if result['winner_id']:
-                                result_text += f"{EMOJI['trophy']} <b>Переможець отримав +{settings.POINTS_FOR_DUEL_WIN} балів!</b>"
-                            else:
-                                result_text += f"{EMOJI['thinking']} <b>Нічия! Обидва учасники молодці!</b>"
-                            
-                            # Повідомлення ініціатору
-                            try:
-                                await self.bot.send_message(duel.initiator_id, result_text)
-                            except:
-                                pass
-                            
-                            # Повідомлення опоненту
-                            if duel.opponent_id:
-                                try:
-                                    await self.bot.send_message(duel.opponent_id, result_text)
-                                except:
-                                    pass
-                        
-                    except Exception as e:
-                        logger.error(f"Помилка завершення дуелі {duel.id}: {e}")
+                for duel in frozen_duels:
+                    duel.status = 'CANCELLED'
+                    logger.info(f"❄️ Скасовано заморожений дуель #{duel.id}")
                 
-                if expired_duels:
-                    logger.info(f"🏁 Завершено {len(expired_duels)} просрочених дуелей")
-                
+                if frozen_duels:
+                    session.commit()
+            
         except Exception as e:
-            logger.error(f"Помилка завершення дуелей: {e}")
+            logger.error(f"❌ Помилка очищення дуелів: {e}")
     
-    async def inactive_users_reminder(self):
-        """Нагадування неактивним користувачам"""
+    # ===== ПЕРЕВІРКА ЗАВЕРШЕННЯ ДУЕЛІВ =====
+    
+    async def _duel_completion_check_loop(self):
+        """Цикл перевірки завершення дуелів"""
+        while self.is_running:
+            try:
+                await self._check_duel_completions()
+                await asyncio.sleep(30)  # Кожні 30 секунд
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"❌ Помилка перевірки дуелів: {e}")
+                await asyncio.sleep(60)
+    
+    async def _check_duel_completions(self):
+        """Перевірити дуелі що потребують завершення"""
         try:
-            # Користувачі, які не були активні 3 дні
-            three_days_ago = datetime.utcnow() - timedelta(days=3)
+            from database import get_db_session
+            from database.models import Duel
             
             with get_db_session() as session:
-                inactive_users = session.query(User).filter(
-                    User.last_active < three_days_ago,
-                    User.daily_subscription == False,  # Не підписані на розсилку
-                    User.points > 0  # Але мають бали (колись були активними)
-                ).limit(50).all()  # Обмежуємо кількість
+                # Знайти дуелі що мають завершитися
+                now = datetime.utcnow()
                 
-                reminder_text = (
-                    f"{EMOJI['thinking']} <b>Сумуємо за тобою!</b>\n\n"
-                    f"{EMOJI['brain']} Поки ти був відсутній, з'явилося багато нових жартів\n"
-                    f"{EMOJI['fire']} Твоя позиція в рейтингу може змінитися\n"
-                    f"{EMOJI['vs']} З'явилися нові дуелі жартів\n"
-                    f"{EMOJI['star']} Повертайся швидше!\n\n"
-                    f"{EMOJI['laugh']} /meme - отримати новий мем\n"
-                    f"{EMOJI['calendar']} /daily - підписатися на щоденну розсилку\n"
-                    f"{EMOJI['profile']} /profile - переглянути свій профіль"
-                )
+                duels_to_complete = session.query(Duel).filter(
+                    Duel.status == 'ACTIVE',
+                    Duel.ends_at <= now
+                ).all()
                 
-                sent_count = 0
-                for user in inactive_users:
-                    try:
-                        await self.bot.send_message(user.id, reminder_text)
-                        sent_count += 1
-                        await asyncio.sleep(1)  # Пауза між повідомленнями
-                    except:
-                        continue
-                
-                if sent_count > 0:
-                    logger.info(f"📬 Надіслано нагадувань {sent_count} неактивним користувачам")
-                
+                for duel in duels_to_complete:
+                    from handlers.duel_handlers import complete_duel
+                    await complete_duel(self.bot, duel)
+            
         except Exception as e:
-            logger.error(f"Помилка нагадування: {e}")
+            logger.error(f"❌ Помилка перевірки завершення дуелів: {e}")
     
-    async def weekly_top_rewards(self):
-        """Тижневі нагороди топ-користувачам"""
+    # ===== ОНОВЛЕННЯ СТАТИСТИКИ =====
+    
+    async def _statistics_update_loop(self):
+        """Цикл оновлення детальної статистики"""
+        while self.is_running:
+            try:
+                await self._update_detailed_statistics()
+                await asyncio.sleep(1800)  # Кожні 30 хвилин
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"❌ Помилка оновлення статистики: {e}")
+                await asyncio.sleep(900)  # 15 хвилин при помилці
+    
+    async def _update_detailed_statistics(self):
+        """Оновити детальну статистику"""
         try:
+            from database import get_db_session
+            from database.models import User, Content, Duel, Rating
+            from sqlalchemy import func
+            
             with get_db_session() as session:
-                # Топ-3 користувачі за балами
-                top_users = session.query(User).order_by(User.points.desc()).limit(3).all()
+                # Загальна статистика
+                stats = {
+                    'total_users': session.query(User).count(),
+                    'total_content': session.query(Content).count(),
+                    'approved_content': session.query(Content).filter(Content.status == 'APPROVED').count(),
+                    'total_duels': session.query(Duel).count(),
+                    'total_ratings': session.query(Rating).count()
+                }
                 
-                if not top_users:
-                    return
+                logger.debug(f"📊 Статистика: {stats}")
                 
-                rewards = [
-                    (50, "🥇", "ЧЕМПІОН ТИЖНЯ"),
-                    (30, "🥈", "СРІБНИЙ ПРИЗЕР"),
-                    (20, "🥉", "БРОНЗОВИЙ ПРИЗЕР")
-                ]
-                
-                for i, user in enumerate(top_users):
-                    if i < len(rewards):
-                        bonus_points, medal, title = rewards[i]
-                        
-                        # Нарахування бонусних балів
-                        await update_user_points(
-                            user.id, 
-                            bonus_points, 
-                            f"тижнева нагорода - {title.lower()}"
-                        )
-                        
-                        # Повідомлення переможцю
-                        try:
-                            reward_text = (
-                                f"{medal} <b>{title}!</b>\n\n"
-                                f"{EMOJI['trophy']} Вітаємо, {user.first_name or 'Гумористе'}!\n"
-                                f"{EMOJI['fire']} Ти в топ-{i+1} за цей тиждень!\n"
-                                f"{EMOJI['star']} Бонус: +{bonus_points} балів\n\n"
-                                f"{EMOJI['rocket']} Продовжуй в тому ж дусі!"
-                            )
-                            
-                            await self.bot.send_message(user.id, reward_text)
-                        except:
-                            pass
-                
-                # Повідомлення в загальний чат про топ
-                top_announcement = (
-                    f"{EMOJI['trophy']} <b>ПІДСУМКИ ТИЖНЯ!</b>\n\n"
-                    f"🥇 {top_users[0].first_name or 'Невідомий'} - {top_users[0].points} балів\n"
-                )
-                
-                if len(top_users) > 1:
-                    top_announcement += f"🥈 {top_users[1].first_name or 'Невідомий'} - {top_users[1].points} балів\n"
-                
-                if len(top_users) > 2:
-                    top_announcement += f"🥉 {top_users[2].first_name or 'Невідомий'} - {top_users[2].points} балів\n"
-                
-                top_announcement += f"\n{EMOJI['fire']} Вітаємо переможців!"
-                
-                # Розсилка топ-5 активним користувачам
-                active_users = session.query(User).filter(
-                    User.last_active >= datetime.utcnow() - timedelta(days=7)
-                ).limit(20).all()
-                
-                for user in active_users[:10]:  # Тільки топ-10 активним
-                    try:
-                        await self.bot.send_message(user.id, top_announcement)
-                        await asyncio.sleep(0.5)
-                    except:
-                        continue
-                
-                logger.info(f"🏆 Тижневі нагороди надано {len(top_users)} користувачам")
+                # Тут можна було б зберегти в спеціальну таблицю статистики
                 
         except Exception as e:
-            logger.error(f"Помилка тижневих нагород: {e}")
-
-# Допоміжні функції для ручного керування
-
-async def send_broadcast_message(bot, message_text: str, target_users: List[int] = None):
-    """Розсилка повідомлення всім або вибраним користувачам"""
-    try:
-        if target_users is None:
-            # Розсилка всім користувачам
+            logger.error(f"❌ Помилка детальної статистики: {e}")
+    
+    # ===== ПУБЛІЧНІ МЕТОДИ =====
+    
+    async def send_broadcast_message(self, message: str, target_group: str = "all"):
+        """Надіслати розсилку вручну"""
+        try:
+            from database import get_db_session
+            from database.models import User
+            
             with get_db_session() as session:
-                all_users = session.query(User).all()
-                target_users = [user.id for user in all_users]
+                # Вибрати цільову групу
+                if target_group == "all":
+                    users = session.query(User).all()
+                elif target_group == "active":
+                    week_ago = datetime.utcnow() - timedelta(days=7)
+                    users = session.query(User).filter(User.last_active >= week_ago).all()
+                elif target_group == "subscribed":
+                    users = session.query(User).filter(User.daily_subscription == True).all()
+                else:
+                    users = []
+                
+                if not users:
+                    return {"success": False, "error": "Немає користувачів для розсилки"}
+                
+                # Відправити повідомлення
+                success_count = 0
+                for user in users:
+                    try:
+                        await self.bot.send_message(user.id, message)
+                        success_count += 1
+                        await asyncio.sleep(0.1)
+                    except Exception:
+                        pass
+                
+                return {
+                    "success": True,
+                    "total_users": len(users),
+                    "successful_sends": success_count
+                }
         
-        success_count = 0
-        for user_id in target_users:
-            try:
-                await bot.send_message(user_id, message_text)
-                success_count += 1
-                await asyncio.sleep(0.1)  # Анти-спам пауза
-            except:
-                continue
+        except Exception as e:
+            logger.error(f"❌ Помилка ручної розсилки: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def get_scheduler_status(self):
+        """Отримати статус планувальника"""
+        return {
+            "is_running": self.is_running,
+            "tasks_count": len(self.tasks),
+            "last_daily_broadcast": self.last_daily_broadcast.isoformat() if self.last_daily_broadcast else None,
+            "timezone": TIMEZONE,
+            "broadcast_time": f"{DAILY_BROADCAST_HOUR:02d}:{DAILY_BROADCAST_MINUTE:02d}"
+        }
+
+# ===== ДОПОМІЖНІ ФУНКЦІЇ =====
+
+async def schedule_task_at_time(target_time: time, task_func, *args, **kwargs):
+    """Запланувати виконання задачі на конкретний час"""
+    while True:
+        now = datetime.now()
         
-        logger.info(f"📢 Розсилку надіслано {success_count}/{len(target_users)} користувачів")
-        return success_count
+        # Розрахувати час до виконання
+        target_datetime = datetime.combine(now.date(), target_time)
         
-    except Exception as e:
-        logger.error(f"Помилка розсилки: {e}")
-        return 0
+        # Якщо час вже минув сьогодні, запланувати на завтра
+        if target_datetime <= now:
+            target_datetime += timedelta(days=1)
+        
+        # Чекати до потрібного часу
+        sleep_seconds = (target_datetime - now).total_seconds()
+        await asyncio.sleep(sleep_seconds)
+        
+        # Виконати задачу
+        try:
+            await task_func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"❌ Помилка запланованої задачі: {e}")
+
+def create_scheduler_service(bot):
+    """Створити сервіс планувальника"""
+    return SchedulerService(bot)
