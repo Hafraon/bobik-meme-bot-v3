@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🧠😂🔥 ПРОФЕСІЙНИЙ УКРАЇНОМОВНИЙ TELEGRAM-БОТ З ДУЕЛЯМИ 🧠😂🔥
+🤖 ПРОФЕСІЙНИЙ УКРАЇНОМОВНИЙ TELEGRAM-БОТ З ПОВНОЮ АВТОМАТИЗАЦІЄЮ 🤖
 
-НОВИНКИ В КРОЦІ 5:
-⚔️ Повна система дуелів жартів
-🗳️ Голосування за найкращий контент  
-🏆 Рейтингова система дуелістів
-🎯 Автоматичне завершення дуелів
-📊 Розширена статистика та ранги
+КРОК 6: АВТОМАТИЗАЦІЯ ТА РОЗУМНІ РОЗСИЛКИ
+⚡ Автоматичні щоденні розсилки контенту
+🤖 Розумний планувальник завдань
+📊 Автоматична статистика та звіти
+🏆 Автоматичні турніри та події
+🧹 Самоочищення та оптимізація
 """
 
 import asyncio
@@ -28,8 +28,8 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-class UkrainianTelegramBotWithDuels:
-    """Україномовний бот з повною системою дуелів"""
+class AutomatedUkrainianTelegramBot:
+    """Україномовний бот з повною автоматизацією"""
     
     def __init__(self):
         self.bot = None
@@ -38,6 +38,11 @@ class UkrainianTelegramBotWithDuels:
         self.db_available = False
         self.handlers_status = {}
         self.shutdown_event = asyncio.Event()
+        
+        # Системи автоматизації
+        self.scheduler = None
+        self.broadcast_system = None
+        self.automation_active = False
         
     def is_admin(self, user_id: int) -> bool:
         """Перевірка чи користувач є адміністратором"""
@@ -51,7 +56,7 @@ class UkrainianTelegramBotWithDuels:
             return user_id == 603047391  # Fallback admin ID
 
     async def initialize_bot(self):
-        """Ініціалізація бота з повною підтримкою дуелів"""
+        """Ініціалізація бота"""
         try:
             logger.info("🔍 Завантаження налаштувань...")
             
@@ -88,23 +93,15 @@ class UkrainianTelegramBotWithDuels:
             return False
 
     async def initialize_database(self):
-        """Ініціалізація бази даних з підтримкою дуелів"""
+        """Ініціалізація бази даних"""
         try:
-            logger.info("💾 Ініціалізація БД з підтримкою дуелів...")
+            logger.info("💾 Ініціалізація БД...")
             
             from database.database import init_database
             success = await init_database()
             
             if success:
                 logger.info("✅ Database initialized successfully")
-                
-                # Перевірка моделей дуелів
-                try:
-                    from database.models import Duel, DuelVote
-                    logger.info("✅ Duel models loaded successfully")
-                except ImportError as e:
-                    logger.warning(f"⚠️ Duel models not available: {e}")
-                
                 self.db_available = True
                 return True
             else:
@@ -118,37 +115,69 @@ class UkrainianTelegramBotWithDuels:
             logger.error(f"❌ Database initialization error: {e}")
             return False
 
-    async def register_handlers(self):
-        """Реєстрація всіх хендлерів включно з дуелями"""
+    async def initialize_automation(self):
+        """Ініціалізація системи автоматизації"""
         try:
-            logger.info("🔧 Реєстрація хендлерів з підтримкою дуелів...")
+            logger.info("🤖 Ініціалізація системи автоматизації...")
+            
+            # Створення автоматизованого планувальника
+            from services.automated_scheduler import create_automated_scheduler
+            self.scheduler = await create_automated_scheduler(self.bot)
+            
+            if self.scheduler:
+                logger.info("✅ Automated scheduler створено")
+                
+                # Запуск планувальника
+                await self.scheduler.start()
+                self.automation_active = True
+                
+                # Отримуємо broadcast system з планувальника
+                self.broadcast_system = self.scheduler.broadcast_system
+                
+                logger.info("🤖 Повна автоматизація активна!")
+                return True
+            else:
+                logger.warning("⚠️ Не вдалося створити планувальник")
+                return False
+                
+        except ImportError as e:
+            logger.warning(f"⚠️ Automation services not available: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Automation initialization error: {e}")
+            return False
+
+    async def register_handlers(self):
+        """Реєстрація всіх хендлерів з автоматизацією"""
+        try:
+            logger.info("🔧 Реєстрація хендлерів з автоматизацією...")
             
             # Реєстрація через handlers/__init__.py
             from handlers import register_handlers
             self.handlers_status = register_handlers(self.dp)
             
-            # Додаткові основні хендлери
-            await self.register_core_handlers()
+            # Додаткові основні хендлери з автоматизацією
+            await self.register_automation_handlers()
             
-            # Callback хендлер з підтримкою дуелів
+            # Callback хендлер з підтримкою автоматизації
             await self.register_enhanced_callbacks()
             
-            logger.info("✅ All handlers registered with duel support")
+            logger.info("✅ All handlers registered with automation support")
             return True
             
         except Exception as e:
             logger.error(f"❌ Handlers registration failed: {e}")
             return False
 
-    async def register_core_handlers(self):
-        """Основні хендлери з меню дуелів"""
+    async def register_automation_handlers(self):
+        """Хендлери з підтримкою автоматизації"""
         from aiogram import F
         from aiogram.filters import Command
         from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
         
         @self.dp.message(Command("start"))
-        async def enhanced_start(message: Message):
-            """Розширена команда /start з меню дуелів"""
+        async def automated_start(message: Message):
+            """Розширена команда /start з автоматизацією"""
             try:
                 user_id = message.from_user.id
                 is_admin = self.is_admin(user_id)
@@ -165,24 +194,28 @@ class UkrainianTelegramBotWithDuels:
                     except Exception as e:
                         logger.error(f"Error creating user: {e}")
                 
-                # Текст привітання
-                text = "🧠😂🔥 <b>УКРАЇНОМОВНИЙ БОТ З ДУЕЛЯМИ!</b> 🧠😂🔥\n\n"
+                # Текст привітання з автоматизацією
+                text = "🤖 <b>ПРОФЕСІЙНИЙ БОТ З АВТОМАТИЗАЦІЄЮ!</b> 🤖\n\n"
                 
                 if is_admin:
-                    text += "👑 <b>Адмін режим активний</b>\n\n"
+                    text += "👑 <b>Адмін режим + Автоматизація</b>\n\n"
                 
                 text += (
-                    "🎯 <b>Новинка: ДУЕЛІ ЖАРТІВ!</b> ⚔️\n"
-                    "Змагайтеся за звання найкращого коміка!\n\n"
-                    "📋 <b>Головні функції:</b>\n"
-                    "• ⚔️ Дуелі жартів з голосуванням\n"
-                    "• 😂 Меми та анекдоти\n"
-                    "• 🏆 Рейтингова система\n"
-                    "• 👤 Персональний профіль\n"
-                    "• 📊 Детальна статистика"
+                    "🎯 <b>НОВИНКА: ПОВНА АВТОМАТИЗАЦІЯ!</b> ⚡\n"
+                    "Бот тепер працює самостійно 24/7!\n\n"
+                    "🤖 <b>Автоматичні функції:</b>\n"
+                    "• 📢 Щоденні розсилки контенту\n"
+                    "• ⚔️ Автоматичні дуелі та турніри\n"
+                    "• 📊 Розумна статистика\n"
+                    "• 🏆 Автоматичні нагороди\n"
+                    "• 🧹 Самоочищення системи\n\n"
+                    "😂 <b>Основний функціонал:</b>\n"
+                    "• Меми, жарти, анекдоти\n"
+                    "• Дуелі з голосуванням\n"
+                    "• Система рангів та балів"
                 )
                 
-                # Створення клавіатури з дуелями
+                # Створення клавіатури з автоматизацією
                 keyboard_rows = [
                     [InlineKeyboardButton(text="⚔️ Дуелі жартів", callback_data="duel_menu")],
                     [
@@ -195,11 +228,17 @@ class UkrainianTelegramBotWithDuels:
                     ]
                 ]
                 
-                # Адмін кнопки
+                # Адмін кнопки з автоматизацією
                 if is_admin:
-                    keyboard_rows.append([
-                        InlineKeyboardButton(text="🛡️ Модерація", callback_data="admin_moderate"),
-                        InlineKeyboardButton(text="📈 Адмін стат", callback_data="admin_stats")
+                    keyboard_rows.extend([
+                        [
+                            InlineKeyboardButton(text="🛡️ Модерація", callback_data="admin_moderate"),
+                            InlineKeyboardButton(text="📈 Статистика", callback_data="admin_stats")
+                        ],
+                        [
+                            InlineKeyboardButton(text="🤖 Автоматизація", callback_data="automation_status"),
+                            InlineKeyboardButton(text="📢 Розсилки", callback_data="broadcast_control")
+                        ]
                     ])
                 
                 keyboard_rows.append([
@@ -210,22 +249,31 @@ class UkrainianTelegramBotWithDuels:
                 
                 await message.answer(text, reply_markup=keyboard)
                 
-                # Повідомлення адміну про запуск з дуелями
-                if is_admin:
+                # Повідомлення адміну про запуск з автоматизацією
+                if is_admin and self.automation_active:
                     try:
                         from config.settings import settings
                         uptime = datetime.now() - self.startup_time
+                        
+                        # Статус автоматизації
+                        automation_status = self.scheduler.get_scheduler_status() if self.scheduler else {}
+                        
                         admin_text = (
-                            f"✅ <b>Бот запущено в професійному режимі з дуелями!</b>\n\n"
-                            f"⚔️ <b>Система дуелів:</b> Активна\n"
+                            f"🤖 <b>БОТ ЗАПУЩЕНО З ПОВНОЮ АВТОМАТИЗАЦІЄЮ!</b>\n\n"
+                            f"⚡ <b>Система автоматизації:</b> {'Активна' if self.automation_active else 'Неактивна'}\n"
                             f"💾 <b>База даних:</b> {'Підключена' if self.db_available else 'Fallback'}\n"
                             f"🔧 <b>Хендлери:</b> {self.handlers_status.get('total_registered', 0)}/4\n"
+                            f"📅 <b>Завдань у черзі:</b> {automation_status.get('total_jobs', 0)}\n"
                             f"⏰ <b>Uptime:</b> {uptime.total_seconds():.1f}с\n\n"
-                            f"🎯 <b>Нові функції:</b>\n"
-                            f"• /duel - система дуелів\n"
-                            f"• Голосування за жарти\n"
-                            f"• Рейтинги дуелістів\n"
-                            f"• Автоматичне завершення дуелів"
+                            f"🎯 <b>Автоматичні функції:</b>\n"
+                            f"• Щоденні розсилки контенту (9:00)\n"
+                            f"• Вечірня статистика (20:00)\n"
+                            f"• Автоматичне завершення дуелей\n"
+                            f"• Нагадування про активні дуелі\n"
+                            f"• Тижневі турніри (п'ятниця)\n"
+                            f"• Місячні підсумки\n"
+                            f"• Автоматична очистка даних\n\n"
+                            f"🚀 Бот працює повністю автономно!"
                         )
                         
                         await self.bot.send_message(settings.ADMIN_ID, admin_text)
@@ -233,48 +281,54 @@ class UkrainianTelegramBotWithDuels:
                         logger.error(f"Error sending admin notification: {e}")
                 
             except Exception as e:
-                logger.error(f"Error in start handler: {e}")
-                await message.answer("🤖 Бот запущено! Використовуйте /help для довідки.")
+                logger.error(f"Error in automated start handler: {e}")
+                await message.answer("🤖 Бот запущено з автоматизацією! Використовуйте /help для довідки.")
 
         @self.dp.message(Command("help"))
-        async def enhanced_help(message: Message):
-            """Розширена довідка з дуелями"""
+        async def automated_help(message: Message):
+            """Розширена довідка з автоматизацією"""
             try:
                 text = (
-                    "📖 <b>ДОВІДКА - ПРОФЕСІЙНИЙ БОТ З ДУЕЛЯМИ</b>\n\n"
+                    "📖 <b>ДОВІДКА - БОТ З АВТОМАТИЗАЦІЄЮ</b>\n\n"
                     
-                    "⚔️ <b>ДУЕЛІ ЖАРТІВ (НОВИНКА!):</b>\n"
+                    "🤖 <b>АВТОМАТИЗАЦІЯ (НОВИНКА!):</b>\n"
+                    "• Бот працює самостійно 24/7\n"
+                    "• Щоденні розсилки контенту\n"
+                    "• Автоматичні турніри та події\n"
+                    "• Розумна статистика\n"
+                    "• Самоочищення системи\n\n"
+                    
+                    "⚔️ <b>ДУЕЛІ ЖАРТІВ:</b>\n"
                     "• /duel - головне меню дуелів\n"
-                    "• Голосуйте за найкращий жарт\n"
-                    "• Здобувайте рейтинг та ранги\n"
-                    "• Отримуйте бали за перемоги\n\n"
+                    "• Автоматичне завершення дуелей\n"
+                    "• Нагадування про активні змагання\n"
+                    "• Автоматичні турніри\n\n"
                     
                     "😂 <b>КОНТЕНТ:</b>\n"
                     "• /meme - випадковий мем\n"
                     "• /joke - смішний жарт\n"
                     "• /anekdot - український анекдот\n"
-                    "• Лайкайте та діліться\n\n"
+                    "• Щоденний кращий контент\n\n"
                     
                     "👤 <b>ПРОФІЛЬ:</b>\n"
                     "• /profile - ваша статистика\n"
-                    "• Система балів та рангів\n"
-                    "• Історія дуелей\n"
-                    "• Досягнення\n\n"
+                    "• Автоматичні нагороди\n"
+                    "• Повідомлення про досягнення\n"
+                    "• Підвищення рангів\n\n"
                     
                     "🎮 <b>СИСТЕМА БАЛІВ:</b>\n"
                     "• +2 бали за голосування в дуелі\n"
                     "• +10 балів за участь у дуелі\n"
                     "• +25 балів за перемогу\n"
-                    "• +50 балів за розгромну перемогу\n\n"
+                    "• +50 балів за розгромну перемогу\n"
+                    "• Бонуси за турніри та досягнення\n\n"
                     
-                    "🏆 <b>РАНГИ ДУЕЛІСТІВ:</b>\n"
-                    "• 🥉 Стажер (0-999)\n"
-                    "• 🎯 Новачок (1000-1199)\n"
-                    "• 🔥 Досвідчений (1200-1399)\n"
-                    "• ⚡ Професіонал (1400-1599)\n"
-                    "• ⭐ Експерт (1600-1799)\n"
-                    "• 🏆 Майстер (1800-1999)\n"
-                    "• 👑 Гранд-майстер (2000+)"
+                    "📅 <b>АВТОМАТИЧНИЙ РОЗКЛАД:</b>\n"
+                    "• 9:00 - ранкова розсилка\n"
+                    "• 20:00 - вечірня статистика\n"
+                    "• П'ятниця 19:00 - тижневий турнір\n"
+                    "• Неділя 18:00 - тижневий дайджест\n"
+                    "• 1 число - місячні підсумки"
                 )
                 
                 # Адмін команди
@@ -283,23 +337,76 @@ class UkrainianTelegramBotWithDuels:
                         "\n\n🛡️ <b>АДМІН КОМАНДИ:</b>\n"
                         "• /admin_stats - детальна статистика\n"
                         "• /moderate - модерація контенту\n"
-                        "• /pending - контент на розгляді\n"
-                        "• /approve_ID - схвалити\n"
-                        "• /reject_ID причина - відхилити"
+                        "• /automation_status - статус автоматизації\n"
+                        "• /broadcast_now - ручна розсилка\n"
+                        "• /scheduler_info - інформація планувальника"
                     )
                 
                 await message.answer(text)
                 
             except Exception as e:
-                logger.error(f"Error in help handler: {e}")
-                await message.answer("📖 <b>Довідка</b>\n\nБазові команди: /start, /duel, /profile, /help")
+                logger.error(f"Error in automated help handler: {e}")
+                await message.answer("📖 <b>Довідка</b>\n\nОсновні команди: /start, /duel, /profile, /help")
+
+        # Спеціальні команди автоматизації для адміна
+        @self.dp.message(Command("automation_status"))
+        async def automation_status_command(message: Message):
+            """Статус автоматизації (тільки для адміна)"""
+            if not self.is_admin(message.from_user.id):
+                await message.answer("❌ Доступ заборонено")
+                return
+                
+            try:
+                if self.scheduler:
+                    status = self.scheduler.get_scheduler_status()
+                    
+                    text = (
+                        f"🤖 <b>СТАТУС АВТОМАТИЗАЦІЇ</b>\n\n"
+                        f"✅ Планувальник: {'Активний' if status['is_running'] else 'Неактивний'}\n"
+                        f"📅 Завдань: {status['total_jobs']}\n"
+                        f"⏰ Наступне: {status['next_job']}\n\n"
+                        f"📊 <b>Статистика:</b>\n"
+                        f"🎯 Виконано завдань: {status['stats']['jobs_executed']}\n"
+                        f"📢 Розсилок: {status['stats']['broadcasts_sent']}\n"
+                        f"🏁 Завершено дуелей: {status['stats']['duels_finished']}\n"
+                        f"🧹 Очищено даних: {status['stats']['data_cleaned']}\n"
+                        f"❌ Помилок: {status['stats']['errors']}\n\n"
+                        f"⏱️ Остання активність: {status['stats'].get('last_activity', 'Невідомо')}"
+                    )
+                else:
+                    text = "❌ Планувальник не ініціалізований"
+                
+                await message.answer(text)
+                
+            except Exception as e:
+                logger.error(f"Error in automation status: {e}")
+                await message.answer(f"❌ Помилка отримання статусу: {e}")
+
+        @self.dp.message(Command("broadcast_now"))
+        async def manual_broadcast(message: Message):
+            """Ручна розсилка (тільки для адміна)"""
+            if not self.is_admin(message.from_user.id):
+                await message.answer("❌ Доступ заборонено")
+                return
+                
+            try:
+                if self.broadcast_system:
+                    await message.answer("📢 Запуск ручної розсилки...")
+                    await self.broadcast_system.send_daily_content()
+                    await message.answer("✅ Розсилка завершена")
+                else:
+                    await message.answer("❌ Система розсилок недоступна")
+                    
+            except Exception as e:
+                logger.error(f"Error in manual broadcast: {e}")
+                await message.answer(f"❌ Помилка розсилки: {e}")
 
     async def register_enhanced_callbacks(self):
-        """Розширені callback хендлери з підтримкою дуелів"""
+        """Розширені callback хендлери з автоматизацією"""
         
         @self.dp.callback_query()
-        async def handle_enhanced_callbacks(callback):
-            """Головний callback хендлер з підтримкою дуелів"""
+        async def handle_automated_callbacks(callback):
+            """Головний callback хендлер з автоматизацією"""
             try:
                 data = callback.data
                 user_id = callback.from_user.id
@@ -313,21 +420,45 @@ class UkrainianTelegramBotWithDuels:
                 ]):
                     return  # Нехай спеціалізовані хендлери обробляють
                 
-                # Основні callback'и
-                if data == "duel_menu":
-                    # Переходимо до меню дуелів
-                    try:
-                        from handlers.duel_handlers import cmd_duel
-                        await cmd_duel(callback.message)
-                        await callback.answer("⚔️ Дуелі жартів!")
-                    except ImportError:
-                        await callback.message.edit_text(
-                            "⚔️ <b>ДУЕЛІ ЖАРТІВ</b>\n\n"
-                            "Система дуелів тимчасово недоступна.\n"
-                            "Спробуйте пізніше або використайте /duel"
+                # Нові callback'и автоматизації
+                if data == "automation_status" and is_admin:
+                    if self.scheduler:
+                        status = self.scheduler.get_scheduler_status()
+                        text = (
+                            f"🤖 <b>СТАТУС АВТОМАТИЗАЦІЇ</b>\n\n"
+                            f"⚡ Планувальник: {'Активний' if status['is_running'] else 'Неактивний'}\n"
+                            f"📅 Завдань: {status['total_jobs']}\n"
+                            f"⏰ Наступне: {status['next_job']}\n"
+                            f"🎯 Виконано: {status['stats']['jobs_executed']}\n"
+                            f"📢 Розсилок: {status['stats']['broadcasts_sent']}\n"
+                            f"❌ Помилок: {status['stats']['errors']}"
                         )
-                        await callback.answer("Завантаження...")
-                        
+                    else:
+                        text = "❌ Планувальник не ініціалізований"
+                    
+                    await callback.message.edit_text(text)
+                    await callback.answer()
+                    
+                elif data == "broadcast_control" and is_admin:
+                    text = (
+                        f"📢 <b>УПРАВЛІННЯ РОЗСИЛКАМИ</b>\n\n"
+                        f"🤖 Автоматичні розсилки:\n"
+                        f"• 9:00 - ранковий контент\n"
+                        f"• 20:00 - вечірня статистика\n"
+                        f"• Неділя 18:00 - тижневий дайджест\n\n"
+                        f"⚡ Статус: {'Активні' if self.automation_active else 'Неактивні'}\n\n"
+                        f"💡 Використовуйте /broadcast_now для ручної розсилки"
+                    )
+                    
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="📊 Статистика розсилок", callback_data="broadcast_stats")],
+                        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_menu")]
+                    ])
+                    
+                    await callback.message.edit_text(text, reply_markup=keyboard)
+                    await callback.answer()
+                
+                # Основні callback'и (як раніше, але з автоматизацією)
                 elif data == "get_meme":
                     try:
                         from handlers.content_handlers import handle_meme_command
@@ -336,17 +467,22 @@ class UkrainianTelegramBotWithDuels:
                     except ImportError:
                         await callback.message.answer("😂 <i>Коли твій код працює з першого разу...\nЗначить щось пішло не так! 🤔</i>")
                         await callback.answer()
-                        
-                elif data == "get_joke":
+                
+                elif data == "duel_menu":
                     try:
-                        from handlers.content_handlers import handle_joke_command
-                        await handle_joke_command(callback.message)
-                        await callback.answer("🤣 Жарт завантажено!")
+                        from handlers.duel_handlers import cmd_duel
+                        await cmd_duel(callback.message)
+                        await callback.answer("⚔️ Дуелі жартів!")
                     except ImportError:
-                        await callback.message.answer("🤣 <i>Програміст заходить у бар...\nБармен каже: 'Як завжди?' Програміст: 'Ні, цього разу я просто випити прийшов!'</i>")
-                        await callback.answer()
+                        await callback.message.edit_text(
+                            "⚔️ <b>ДУЕЛІ ЖАРТІВ</b>\n\n"
+                            "🤖 Автоматичні дуелі та турніри!\n"
+                            "Система тимчасово завантажується..."
+                        )
+                        await callback.answer("Завантаження...")
                 
                 elif data == "profile":
+                    # Розширений профіль з автоматизацією
                     if self.db_available:
                         try:
                             from database.services import get_user_by_id, get_user_duel_stats
@@ -357,24 +493,9 @@ class UkrainianTelegramBotWithDuels:
                             if user:
                                 # Визначаємо ранг
                                 points = user.get('total_points', 0)
-                                if points >= 5000:
-                                    rank = "🚀 Гумористичний Геній"
-                                elif points >= 3000:
-                                    rank = "🌟 Легенда Мемів"
-                                elif points >= 1500:
-                                    rank = "🏆 Король Гумору"
-                                elif points >= 750:
-                                    rank = "👑 Мастер Рофлу"
-                                elif points >= 350:
-                                    rank = "🎭 Комік"
-                                elif points >= 150:
-                                    rank = "😂 Гуморист"
-                                elif points >= 50:
-                                    rank = "😄 Сміхун"
-                                else:
-                                    rank = "🤡 Новачок"
+                                rank = self.get_rank_by_points(points)
                                 
-                                text = f"👤 <b>ПРОФІЛЬ КОРИСТУВАЧА</b>\n\n"
+                                text = f"👤 <b>ПРОФІЛЬ З АВТОМАТИЗАЦІЄЮ</b>\n\n"
                                 text += f"🏷️ Ім'я: {user.get('full_name', 'Невідомо')}\n"
                                 text += f"👑 Ранг: {rank}\n"
                                 text += f"💰 Бали: {points}\n"
@@ -390,30 +511,15 @@ class UkrainianTelegramBotWithDuels:
                                     text += f"⚔️ <b>СТАТИСТИКА ДУЕЛІВ:</b>\n"
                                     text += f"🏆 Перемоги: {wins}/{total} ({win_rate:.1f}%)\n"
                                     text += f"⭐ Рейтинг: {duel_rating}\n"
-                                    
-                                    # Ранг дуеліста
-                                    if duel_rating >= 2000:
-                                        duel_rank = "👑 Гранд-майстер"
-                                    elif duel_rating >= 1800:
-                                        duel_rank = "🏆 Майстер"
-                                    elif duel_rating >= 1600:
-                                        duel_rank = "⭐ Експерт"
-                                    elif duel_rating >= 1400:
-                                        duel_rank = "⚡ Професіонал"
-                                    elif duel_rating >= 1200:
-                                        duel_rank = "🔥 Досвідчений"
-                                    elif duel_rating >= 1000:
-                                        duel_rank = "🎯 Новачок"
-                                    else:
-                                        duel_rank = "🥉 Стажер"
-                                    
-                                    text += f"🎯 Ранг дуеліста: {duel_rank}\n"
-                                    
-                                    if duel_stats.get('best_win_streak', 0) > 0:
-                                        text += f"🔥 Найкраща серія: {duel_stats['best_win_streak']}\n"
                                 else:
                                     text += "⚔️ <b>Ще не брали участь у дуелях</b>\n"
-                                    text += "Використайте /duel щоб почати!"
+                                    text += "🤖 Автоматичні турніри щоп'ятниці!"
+                                
+                                # Інформація про автоматизацію
+                                text += f"\n🤖 <b>АВТОМАТИЗАЦІЯ:</b>\n"
+                                text += f"📢 Щоденні розсилки активні\n"
+                                text += f"🏆 Автоматичні турніри\n"
+                                text += f"⭐ Повідомлення про досягнення"
                                 
                                 await callback.message.edit_text(text)
                             else:
@@ -427,121 +533,42 @@ class UkrainianTelegramBotWithDuels:
                             "🎮 Ранг: Новачок\n"
                             "💰 Бали: 0\n"
                             "⚔️ Дуелі: 0/0\n\n"
-                            "📊 База даних недоступна"
+                            "🤖 Автоматизація активна!\n"
+                            "📢 Щоденні розсилки\n"
+                            "🏆 Автоматичні турніри"
                         )
                     
                     await callback.answer()
-                    
-                elif data == "stats":
-                    try:
-                        if self.db_available:
-                            from database.services import get_basic_stats
-                            stats = get_basic_stats()
-                            
-                            text = f"📊 <b>СТАТИСТИКА БОТА</b>\n\n"
-                            text += f"👥 Користувачів: {stats.get('total_users', '?')}\n"
-                            text += f"😂 Контенту: {stats.get('total_content', '?')}\n"
-                            text += f"✅ Схвалено: {stats.get('approved_content', '?')}\n"
-                            text += f"⚔️ Дуелей: {stats.get('total_duels', '?')}\n"
-                            text += f"🗳️ Голосів: {stats.get('total_votes', '?')}\n"
-                            text += f"🏆 Активних дуелей: {stats.get('active_duels', '?')}\n\n"
-                            text += f"📈 <b>Система дуелей працює!</b>"
-                        else:
-                            text = (
-                                "📊 <b>СТАТИСТИКА БОТА</b>\n\n"
-                                "🤖 Статус: Онлайн\n"
-                                "⚔️ Дуелі: Активні\n"
-                                "💾 БД: Fallback режим\n"
-                                "🔧 Версія: Professional з дуелями"
-                            )
-                        
-                        await callback.message.edit_text(text)
-                    except Exception as e:
-                        logger.error(f"Error in stats callback: {e}")
-                        await callback.message.edit_text("📊 Статистика тимчасово недоступна")
-                    
-                    await callback.answer()
-                    
-                elif data == "help":
-                    await self.enhanced_help(callback.message)
-                    await callback.answer()
-                    
-                # Адмін callback'и
-                elif data == "admin_moderate" and is_admin:
-                    try:
-                        from handlers.admin_handlers import cmd_moderate
-                        await cmd_moderate(callback.message)
-                        await callback.answer("🛡️ Модерація")
-                    except ImportError:
-                        await callback.message.edit_text("🛡️ Модерація тимчасово недоступна")
-                        await callback.answer()
-                        
-                elif data == "admin_stats" and is_admin:
-                    try:
-                        from handlers.admin_handlers import cmd_admin_stats
-                        await cmd_admin_stats(callback.message)
-                        await callback.answer("📈 Адмін статистика")
-                    except ImportError:
-                        await callback.message.edit_text("📈 Адмін статистика недоступна")
-                        await callback.answer()
                 
                 else:
                     await callback.answer("🔄 Функція завантажується...")
                     
             except Exception as e:
-                logger.error(f"Error in callback handler: {e}")
+                logger.error(f"Error in automated callback handler: {e}")
                 await callback.answer("❌ Помилка обробки")
 
-    async def setup_scheduler(self):
-        """Налаштування планувальника для автоматичного завершення дуелів"""
-        try:
-            logger.info("⏰ Налаштування планувальника дуелів...")
-            
-            from apscheduler.schedulers.asyncio import AsyncIOScheduler
-            from apscheduler.triggers.interval import IntervalTrigger
-            
-            scheduler = AsyncIOScheduler()
-            
-            # Автоматичне завершення прострочених дуелів кожну хвилину
-            if self.db_available:
-                try:
-                    from database.services import auto_finish_expired_duels, cleanup_old_duels
-                    
-                    scheduler.add_job(
-                        auto_finish_expired_duels,
-                        IntervalTrigger(minutes=1),
-                        id='auto_finish_duels',
-                        name='Auto finish expired duels'
-                    )
-                    
-                    # Очистка старих дуелей щодня о 03:00
-                    scheduler.add_job(
-                        cleanup_old_duels,
-                        'cron',
-                        hour=3,
-                        minute=0,
-                        id='cleanup_old_duels',
-                        name='Cleanup old duels'
-                    )
-                    
-                    logger.info("✅ Duel scheduler configured")
-                except ImportError:
-                    logger.warning("⚠️ Duel services not available for scheduler")
-            
-            scheduler.start()
-            logger.info("✅ Scheduler started successfully")
-            return scheduler
-            
-        except ImportError:
-            logger.warning("⚠️ APScheduler not available")
-            return None
-        except Exception as e:
-            logger.error(f"❌ Scheduler setup failed: {e}")
-            return None
+    def get_rank_by_points(self, points: int) -> str:
+        """Визначення рангу за балами"""
+        if points >= 5000:
+            return "🚀 Гумористичний Геній"
+        elif points >= 3000:
+            return "🌟 Легенда Мемів"
+        elif points >= 1500:
+            return "🏆 Король Гумору"
+        elif points >= 750:
+            return "👑 Мастер Рофлу"
+        elif points >= 350:
+            return "🎭 Комік"
+        elif points >= 150:
+            return "😂 Гуморист"
+        elif points >= 50:
+            return "😄 Сміхун"
+        else:
+            return "🤡 Новачок"
 
     async def main(self):
-        """Головна функція запуску бота з дуелями"""
-        logger.info("🚀 Starting Enhanced Ukrainian Telegram Bot with Duels...")
+        """Головна функція запуску бота з автоматизацією"""
+        logger.info("🤖 Starting Automated Ukrainian Telegram Bot...")
         
         try:
             # Ініціалізація компонентів
@@ -551,11 +578,15 @@ class UkrainianTelegramBotWithDuels:
             if not await self.initialize_database():
                 logger.warning("⚠️ Working without full database support")
             
+            # Ініціалізація автоматизації (ключова новинка!)
+            automation_success = await self.initialize_automation()
+            if automation_success:
+                logger.info("🤖 АВТОМАТИЗАЦІЯ АКТИВНА - бот працює самостійно!")
+            else:
+                logger.warning("⚠️ Working without automation")
+            
             if not await self.register_handlers():
                 return False
-            
-            # Планувальник
-            scheduler = await self.setup_scheduler()
             
             # Налаштування graceful shutdown
             def signal_handler():
@@ -565,14 +596,14 @@ class UkrainianTelegramBotWithDuels:
             signal.signal(signal.SIGINT, lambda s, f: signal_handler())
             signal.signal(signal.SIGTERM, lambda s, f: signal_handler())
             
-            logger.info("✅ Bot fully initialized with duel system")
+            logger.info("✅ Bot fully initialized with complete automation")
             
             # Запуск polling з graceful shutdown
             try:
                 polling_task = asyncio.create_task(self.dp.start_polling(self.bot))
                 shutdown_task = asyncio.create_task(self.shutdown_event.wait())
                 
-                logger.info("🎯 Bot started - Duels are active!")
+                logger.info("🎯 Bot started - Full automation active!")
                 
                 # Чекаємо або polling або shutdown
                 done, pending = await asyncio.wait(
@@ -590,9 +621,9 @@ class UkrainianTelegramBotWithDuels:
                 
             finally:
                 # Graceful shutdown
-                if scheduler:
-                    scheduler.shutdown()
-                    logger.info("✅ Scheduler stopped")
+                if self.scheduler:
+                    await self.scheduler.stop()
+                    logger.info("✅ Automated scheduler stopped")
                 
                 await self.bot.session.close()
                 logger.info("✅ Bot session closed")
@@ -607,7 +638,7 @@ class UkrainianTelegramBotWithDuels:
 
 async def main():
     """Точка входу"""
-    bot = UkrainianTelegramBotWithDuels()
+    bot = AutomatedUkrainianTelegramBot()
     success = await bot.main()
     return success
 
@@ -615,7 +646,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("👋 Bot stopped by user")
+        logger.info("👋 Automated bot stopped by user")
     except Exception as e:
         logger.error(f"💥 Fatal error: {e}")
         sys.exit(1)
