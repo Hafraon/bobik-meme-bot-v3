@@ -10,7 +10,7 @@ def register_all_handlers(dp: Dispatcher):
     """Реєстрація всіх хендлерів бота"""
     
     try:
-        # Спроба реєстрації контент хендлерів
+        # Реєстрація контент хендлерів
         from .content_handlers import register_content_handlers
         register_content_handlers(dp)
         logger.info("✅ Content handlers registered")
@@ -19,12 +19,22 @@ def register_all_handlers(dp: Dispatcher):
     except Exception as e:
         logger.error(f"❌ Error registering content handlers: {e}")
     
-    # Тут будуть додаватися інші хендлери в наступних кроках:
-    # - gamification_handlers (профіль, топ, дуелі)
-    # - moderation_handlers (адмін функції)
-    # - admin_panel_handlers (повна адмін панель)
+    try:
+        # Реєстрація адмін хендлерів
+        from .admin_handlers import register_admin_handlers
+        register_admin_handlers(dp)
+        logger.info("✅ Admin handlers registered")
+    except ImportError as e:
+        logger.warning(f"⚠️ Could not import admin handlers: {e}")
+    except Exception as e:
+        logger.error(f"❌ Error registering admin handlers: {e}")
     
-    logger.info("📋 All available handlers registered")
+    # Тут будуть додаватися інші хендлери в наступних кроках:
+    # - gamification_handlers (дуелі, турніри)
+    # - scheduler_handlers (автоматичні розсилки)
+    # - special_events_handlers (особливі події)
+    
+    logger.info("📋 All available handlers registered successfully")
 
 # Експорт для використання
 __all__ = ['register_all_handlers']

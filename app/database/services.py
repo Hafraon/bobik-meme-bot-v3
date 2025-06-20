@@ -267,18 +267,19 @@ def get_random_approved_content(content_type: str = None) -> Optional[Dict]:
         logger.error(f"Error getting random content: {e}")
         return None
 
-# ===== СТАТИСТИКА =====
+# ===== СТАТИСТИКА ТА АНАЛІТИКА =====
 
 def get_basic_stats() -> Dict[str, int]:
     """Отримання базової статистики бота"""
     try:
-        from .models import User, Content, Duel
+        from .models import User, Content, Duel, ContentStatus
         
         with get_db_session() as session:
             total_users = session.query(User).filter(User.is_active == True).count()
             total_content = session.query(Content).count()
-            approved_content = session.query(Content).filter(Content.status == 'approved').count()
-            pending_content = session.query(Content).filter(Content.status == 'pending').count()
+            approved_content = session.query(Content).filter(Content.status == ContentStatus.APPROVED.value).count()
+            pending_content = session.query(Content).filter(Content.status == ContentStatus.PENDING.value).count()
+            rejected_content = session.query(Content).filter(Content.status == ContentStatus.REJECTED.value).count()
             total_duels = session.query(Duel).count()
             
             return {
@@ -286,6 +287,7 @@ def get_basic_stats() -> Dict[str, int]:
                 'total_content': total_content,
                 'approved_content': approved_content,
                 'pending_content': pending_content,
+                'rejected_content': rejected_content,
                 'total_duels': total_duels
             }
             
@@ -296,8 +298,148 @@ def get_basic_stats() -> Dict[str, int]:
             'total_content': 0,
             'approved_content': 0,
             'pending_content': 0,
+            'rejected_content': 0,
             'total_duels': 0
         }
+
+def get_detailed_admin_stats() -> Dict[str, Any]:
+    """Отримання детальної статистики для адміна"""
+    try:
+        from .models import User, Content, ContentStatus, AdminAction
+        from datetime import datetime, timedelta
+        
+        with get_db_session() as session:
+            # Загальна статистика
+            total_users = session.query(User).filter(User.is_active == True).count()
+            
+            # Активність за останній день
+            yesterday = datetime.now() - timedelta(days=1)
+            active_today = session.query(User).filter(
+                User.last_activity >= yesterday,
+                User.is_active == True
+            ).count()
+            
+            # Нові користувачі за тиждень
+            week_ago = datetime.now() - timedelta(days=7)
+            new_users_week = session.query(User).filter(
+                User.created_at >= week_ago,
+                User.is_active == True
+            ).count()
+            
+            # Статистика контенту
+            total_content = session.query(Content).count()
+            approved_content = session.query(Content).filter(Content.status == ContentStatus.APPROVED.value).count()
+            pending_content = session.query(Content).filter(Content.status == ContentStatus.PENDING.value).count()
+            rejected_content = session.query(Content).filter(Content.status == ContentStatus.REJECTED.value).count()
+            
+            # Контент за тиждень
+            new_content_week = session.query(Content).filter(Content.created_at >= week_ago).count()
+            
+            # Топ користувачі по балах
+            top_users = session.query(User).filter(User.is_active == True).order_by(User.points.desc()).limit(5).all()
+            
+            # Активність адміна
+            admin_actions_week = session.query(AdminAction).filter(AdminAction.created_at >= week_ago).count()
+            
+            return {
+                'total_users': total_users,
+                'active_today': active_today,
+                'new_users_week': new_users_week,
+                'total_content': total_content,
+                'approved_content': approved_content,
+                'pending_content': pending_content,
+                'rejected_content': rejected_content,
+                'new_content_week': new_content_week,
+                'admin_actions_week': admin_actions_week,
+                'top_users': [
+                    {
+                        'user_id': user.user_id,
+                        'first_name': user.first_name,
+                        'username': user.username,
+                        'points': user.points,
+                        'rank': user.rank
+                    }
+                    for user in top_users
+                ],
+                'approval_rate': round((approved_content / max(total_content, 1)) * 100, 1) if total_content > 0 else 0
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting detailed admin stats: {e}")
+        return get_basic_stats()  # Fallback до базової статистики
+
+def get_pending_content_list(limit: int = 10) -> List[Dict]:
+    """Отримання списку контенту на модерації"""
+    try:
+        from .models import Content, ContentStatus, User
+        
+        with get_db_session() as session:
+            pending_content = session.query(Content)\
+                                   .filter(Content.status == ContentStatus.PENDING.value)\
+                                   .order_by(Content.created_at.asc())\
+                                   .limit(limit)\
+                                   .all()
+            
+            result = []
+            for content in pending_content:
+                # Отримуємо автора
+                author = session.query(User).filter(User.id == content.author_id).first()
+                author_name = "Невідомий"
+                if author:
+                    author_name = author.first_name or author.username or f"User{author.user_id}"
+                
+                result.append({
+                    'id': content.id,
+                    'type': content.content_type,
+                    'text': content.text,
+                    'author_name': author_name,
+                    'author_user_id': content.author_user_id,
+                    'created_at': content.created_at
+                })
+            
+            return result
+            
+    except Exception as e:
+        logger.error(f"Error getting pending content list: {e}")
+        return []
+
+def get_content_by_id(content_id: int) -> Optional[Dict]:
+    """Отримання контенту по ID"""
+    try:
+        from .models import Content, User
+        
+        with get_db_session() as session:
+            content = session.query(Content).filter(Content.id == content_id).first()
+            
+            if not content:
+                return None
+            
+            # Отримуємо автора
+            author = session.query(User).filter(User.id == content.author_id).first()
+            author_name = "Невідомий"
+            if author:
+                author_name = author.first_name or author.username or f"User{author.user_id}"
+            
+            return {
+                'id': content.id,
+                'type': content.content_type,
+                'status': content.status,
+                'text': content.text,
+                'media_url': content.media_url,
+                'author_name': author_name,
+                'author_user_id': content.author_user_id,
+                'views': content.views,
+                'likes': content.likes,
+                'dislikes': content.dislikes,
+                'created_at': content.created_at,
+                'moderated_at': content.moderated_at,
+                'moderated_by': content.moderated_by,
+                'rejection_reason': content.rejection_reason
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting content by ID {content_id}: {e}")
+        return None
 
 # ===== ТЕСТУВАННЯ =====
 
