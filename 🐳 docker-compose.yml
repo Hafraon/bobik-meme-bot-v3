@@ -1,0 +1,475 @@
+# 🐳 DOCKER COMPOSE ДЛЯ УКРАЇНСЬКОГО TELEGRAM БОТА 🐳
+# Повний стек з базою даних, кешем та моніторингом
+
+version: '3.8'
+
+# ===== МЕРЕЖІ =====
+networks:
+  bot-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ===== VOLUMES =====
+volumes:
+  # База даних PostgreSQL
+  postgres_data:
+    driver: local
+  
+  # Дані бота
+  bot_data:
+    driver: local
+  
+  # Логи
+  bot_logs:
+    driver: local
+  
+  # Резервні копії
+  bot_backups:
+    driver: local
+  
+  # Redis дані
+  redis_data:
+    driver: local
+  
+  # Prometheus дані
+  prometheus_data:
+    driver: local
+  
+  # Grafana дані
+  grafana_data:
+    driver: local
+
+# ===== СЕРВІСИ =====
+services:
+
+  # ===== ГОЛОВНИЙ БОТ =====
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: ukrainian-telegram-bot
+    restart: unless-stopped
+    
+    # Змінні середовища
+    environment:
+      # Основні налаштування бота
+      - BOT_TOKEN=${BOT_TOKEN}
+      - BOT_USERNAME=${BOT_USERNAME:-BobikFun_bot}
+      - ADMIN_ID=${ADMIN_ID:-603047391}
+      - ADDITIONAL_ADMINS=${ADDITIONAL_ADMINS:-}
+      
+      # База даних
+      - DATABASE_URL=postgresql://bot_user:${POSTGRES_PASSWORD:-bot_password}@postgres:5432/${POSTGRES_DB:-ukrainian_bot}
+      - DB_POOL_SIZE=10
+      - DB_MAX_OVERFLOW=20
+      
+      # Redis кеш
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_ENABLED=true
+      - CACHE_TTL_SECONDS=3600
+      
+      # Режим роботи
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      
+      # Автоматизація
+      - AUTOMATION_ENABLED=true
+      - TIMEZONE=Europe/Kiev
+      - MORNING_BROADCAST_HOUR=9
+      - EVENING_STATS_HOUR=20
+      
+      # Розсилки
+      - BROADCAST_ENABLED=true
+      - BROADCAST_RATE_LIMIT=30
+      - DAILY_DIGEST_ENABLED=true
+      - WEEKLY_DIGEST_ENABLED=true
+      
+      # Безпека
+      - RATE_LIMITING_ENABLED=true
+      - MAX_MESSAGES_PER_MINUTE=10
+      - MAX_WARNINGS_BEFORE_BAN=3
+      
+      # Контент
+      - MAX_CONTENT_LENGTH=2000
+      - MAX_SUBMISSIONS_PER_DAY=10
+      - AUTO_MODERATION_ENABLED=false
+      
+      # Дуелі
+      - DUEL_ENABLED=true
+      - DUEL_DURATION_HOURS=24
+      - TOURNAMENT_ENABLED=true
+      
+      # Гейміфікація
+      - POINTS_FOR_SUBMISSION=5
+      - POINTS_FOR_APPROVAL=15
+      - POINTS_FOR_DUEL_WIN=20
+      
+      # Моніторинг
+      - METRICS_ENABLED=true
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      
+      # Файли та медіа
+      - MAX_FILE_SIZE_MB=20
+      - AUTO_CLEANUP_ENABLED=true
+      - CLEANUP_OLDER_THAN_DAYS=30
+    
+    # Порти
+    ports:
+      - "8000:8000"  # Веб-інтерфейс/webhook
+      - "9090:9090"  # Метрики Prometheus
+    
+    # Volumes
+    volumes:
+      - bot_data:/app/data
+      - bot_logs:/app/logs
+      - bot_backups:/app/backups
+      - ./config:/app/config:ro  # Конфігураційні файли
+    
+    # Залежності
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    
+    # Мережа
+    networks:
+      - bot-network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Обмеження ресурсів
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # ===== БАЗА ДАНИХ POSTGRESQL =====
+  postgres:
+    image: postgres:15-alpine
+    container_name: ukrainian-bot-postgres
+    restart: unless-stopped
+    
+    # Змінні середовища
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-ukrainian_bot}
+      - POSTGRES_USER=${POSTGRES_USER:-bot_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-bot_password}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=uk_UA.UTF-8
+      - TZ=Europe/Kiev
+    
+    # Порти (закоментовано для безпеки)
+    # ports:
+    #   - "5432:5432"
+    
+    # Volumes
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+    
+    # Мережа
+    networks:
+      - bot-network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bot_user} -d ${POSTGRES_DB:-ukrainian_bot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
+    # Команда запуску з оптимізаціями
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+
+  # ===== REDIS КЕШ =====
+  redis:
+    image: redis:7-alpine
+    container_name: ukrainian-bot-redis
+    restart: unless-stopped
+    
+    # Порти (закоментовано для безпеки)
+    # ports:
+    #   - "6379:6379"
+    
+    # Volumes
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    
+    # Мережа
+    networks:
+      - bot-network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    
+    # Команда з конфігурацією
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+  # ===== NGINX REVERSE PROXY =====
+  nginx:
+    image: nginx:alpine
+    container_name: ukrainian-bot-nginx
+    restart: unless-stopped
+    
+    # Порти
+    ports:
+      - "80:80"
+      - "443:443"
+    
+    # Volumes
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro  # SSL сертифікати
+      - ./static:/var/www/static:ro  # Статичні файли
+    
+    # Залежності
+    depends_on:
+      - telegram-bot
+    
+    # Мережа
+    networks:
+      - bot-network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===== PROMETHEUS МОНІТОРИНГ =====
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ukrainian-bot-prometheus
+    restart: unless-stopped
+    
+    # Порти
+    ports:
+      - "9091:9090"
+    
+    # Volumes
+    volumes:
+      - prometheus_data:/prometheus
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    
+    # Мережа
+    networks:
+      - bot-network
+    
+    # Команда
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+
+  # ===== GRAFANA ДАШБОРДИ =====
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ukrainian-bot-grafana
+    restart: unless-stopped
+    
+    # Змінні середовища
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    
+    # Порти
+    ports:
+      - "3000:3000"
+    
+    # Volumes
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    
+    # Залежності
+    depends_on:
+      - prometheus
+    
+    # Мережа
+    networks:
+      - bot-network
+
+  # ===== BACKUP СЕРВІС =====
+  backup:
+    build:
+      context: ./backup
+      dockerfile: Dockerfile.backup
+    container_name: ukrainian-bot-backup
+    restart: unless-stopped
+    
+    # Змінні середовища
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${POSTGRES_DB:-ukrainian_bot}
+      - POSTGRES_USER=${POSTGRES_USER:-bot_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-bot_password}
+      - BACKUP_SCHEDULE=0 2 * * *  # Щодня о 2:00
+      - BACKUP_RETENTION_DAYS=30
+      - S3_BUCKET=${S3_BACKUP_BUCKET:-}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+    
+    # Volumes
+    volumes:
+      - bot_backups:/backups
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    
+    # Залежності
+    depends_on:
+      - postgres
+    
+    # Мережа
+    networks:
+      - bot-network
+
+  # ===== LOGROTATE ДЛЯ ЛОГІВ =====
+  logrotate:
+    image: alpine:latest
+    container_name: ukrainian-bot-logrotate
+    restart: unless-stopped
+    
+    # Volumes
+    volumes:
+      - bot_logs:/logs
+      - ./config/logrotate.conf:/etc/logrotate.conf:ro
+    
+    # Команда
+    command: >
+      sh -c "
+      while true; do
+        logrotate /etc/logrotate.conf
+        sleep 3600
+      done
+      "
+
+  # ===== WATCHTOWER ДЛЯ АВТООНОВЛЕНЬ =====
+  watchtower:
+    image: containrrr/watchtower
+    container_name: ukrainian-bot-watchtower
+    restart: unless-stopped
+    
+    # Змінні середовища
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=300  # Перевірка кожні 5 хвилин
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_INCLUDE_RESTARTING=true
+      - WATCHTOWER_NOTIFICATIONS=email
+      - WATCHTOWER_NOTIFICATION_EMAIL_FROM=${EMAIL_FROM:-bot@example.com}
+      - WATCHTOWER_NOTIFICATION_EMAIL_TO=${EMAIL_TO:-admin@example.com}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER=${SMTP_SERVER:-smtp.gmail.com}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PORT=587
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_USER=${SMTP_USER:-}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PASSWORD=${SMTP_PASSWORD:-}
+    
+    # Volumes
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    
+    # Мережа
+    networks:
+      - bot-network
+
+# ===== КОНФІГУРАЦІЯ ДЛЯ РІЗНИХ СЕРЕДОВИЩ =====
+
+# Development override
+# docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+# Production override
+# docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+# ===== КОМАНДИ ДЛЯ КЕРУВАННЯ =====
+
+# Запуск всього стеку:
+# docker-compose up -d
+
+# Запуск тільки бота та БД:
+# docker-compose up -d telegram-bot postgres redis
+
+# Перегляд логів:
+# docker-compose logs -f telegram-bot
+
+# Backup бази даних:
+# docker-compose exec backup /scripts/backup.sh
+
+# Restart бота:
+# docker-compose restart telegram-bot
+
+# Оновлення образів:
+# docker-compose pull && docker-compose up -d
+
+# Очистка:
+# docker-compose down -v --remove-orphans
+
+# ===== МОНІТОРИНГ ТА АЛЕРТИ =====
+
+# Prometheus метрики: http://localhost:9091
+# Grafana дашборди: http://localhost:3000 (admin/admin123)
+# Bot webhook/API: http://localhost:8000
+# Nginx статус: http://localhost/nginx_status
+
+# ===== BACKUP ТА ВІДНОВЛЕННЯ =====
+
+# Ручний backup:
+# docker-compose exec postgres pg_dump -U bot_user ukrainian_bot > backup.sql
+
+# Відновлення:
+# cat backup.sql | docker-compose exec -T postgres psql -U bot_user -d ukrainian_bot
+
+# ===== БЕЗПЕКА =====
+
+# Рекомендації:
+# 1. Змініть паролі в .env файлі
+# 2. Використовуйте SSL сертифікати
+# 3. Налаштуйте firewall
+# 4. Регулярно оновлюйте образи
+# 5. Моніторте логи та метрики
+
+# ===== PRODUCTION КОНФІГУРАЦІЯ =====
+
+# Для production використовуйте:
+# - Зовнішній PostgreSQL (RDS, Cloud SQL)
+# - Redis cluster для високої доступності
+# - Load balancer перед Nginx
+# - External secrets management
+# - Proper SSL/TLS сертифікати
+# - Monitoring та alerting
+# - Automated backups до cloud storage

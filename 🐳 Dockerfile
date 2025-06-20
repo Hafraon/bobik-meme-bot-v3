@@ -1,0 +1,362 @@
+# 🐳 DOCKERFILE ДЛЯ УКРАЇНСЬКОГО TELEGRAM БОТА 🐳
+
+# ===== БАЗОВИЙ ОБРАЗ =====
+# Використовуємо офіційний Python образ з Alpine для мінімального розміру
+FROM python:3.11-alpine AS base
+
+# Метадані
+LABEL maintainer="Ukrainian Telegram Bot Team"
+LABEL description="🧠😂🔥 Professional Ukrainian Telegram Bot with Full Automation"
+LABEL version="3.0.0"
+
+# ===== ЗМІННІ СЕРЕДОВИЩА =====
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    TZ=Europe/Kiev \
+    APP_DIR=/app \
+    USER_NAME=botuser \
+    USER_UID=1000
+
+# ===== СИСТЕМНІ ЗАЛЕЖНОСТІ =====
+RUN apk update && apk add --no-cache \
+    # Базові системні пакети
+    tzdata \
+    curl \
+    wget \
+    bash \
+    git \
+    # Компілятори для Python пакетів
+    gcc \
+    musl-dev \
+    linux-headers \
+    # PostgreSQL клієнт та розробницькі файли
+    postgresql-dev \
+    postgresql-client \
+    # Графічні бібліотеки для Pillow
+    jpeg-dev \
+    zlib-dev \
+    freetype-dev \
+    lcms2-dev \
+    openjpeg-dev \
+    tiff-dev \
+    tk-dev \
+    tcl-dev \
+    # Інші корисні утиліти
+    supervisor \
+    && rm -rf /var/cache/apk/*
+
+# Встановлення часової зони
+RUN cp /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# ===== СТВОРЕННЯ КОРИСТУВАЧА =====
+RUN addgroup -g $USER_UID $USER_NAME && \
+    adduser -D -u $USER_UID -G $USER_NAME -s /bin/bash $USER_NAME
+
+# ===== НАЛАШТУВАННЯ ДИРЕКТОРІЙ =====
+WORKDIR $APP_DIR
+
+# Створення необхідних директорій
+RUN mkdir -p \
+    $APP_DIR/data \
+    $APP_DIR/logs \
+    $APP_DIR/backups \
+    $APP_DIR/media \
+    $APP_DIR/cache \
+    /var/log/supervisor \
+    && chown -R $USER_NAME:$USER_NAME $APP_DIR
+
+# ===== УСТАНОВКА PYTHON ЗАЛЕЖНОСТЕЙ =====
+
+# Оновлення pip до останньої версії
+RUN pip install --upgrade pip setuptools wheel
+
+# Копіювання requirements.txt
+COPY requirements.txt $APP_DIR/
+
+# Встановлення Python залежностей
+RUN pip install --no-cache-dir -r requirements.txt
+
+# ===== КОПІЮВАННЯ КОДУ ПРОГРАМИ =====
+
+# Копіювання всього коду програми
+COPY . $APP_DIR/
+
+# Встановлення правильних прав доступу
+RUN chown -R $USER_NAME:$USER_NAME $APP_DIR && \
+    chmod +x $APP_DIR/app/main.py
+
+# ===== КОНФІГУРАЦІЯ SUPERVISOR =====
+
+# Створення конфігурації supervisor для управління процесами
+RUN cat > /etc/supervisor/conf.d/bot.conf << 'EOF'
+[supervisord]
+nodaemon=true
+user=root
+logfile=/var/log/supervisor/supervisord.log
+pidfile=/var/run/supervisord.pid
+
+[program:telegram-bot]
+command=python /app/app/main.py
+directory=/app
+user=botuser
+autostart=true
+autorestart=true
+redirect_stderr=true
+stdout_logfile=/app/logs/bot.log
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=5
+environment=PYTHONPATH="/app"
+
+[program:health-check]
+command=/app/scripts/health_check.sh
+directory=/app
+user=botuser
+autostart=true
+autorestart=true
+redirect_stderr=true
+stdout_logfile=/app/logs/health.log
+stdout_logfile_maxbytes=1MB
+stdout_logfile_backups=3
+EOF
+
+# ===== СТВОРЕННЯ ДОПОМІЖНИХ СКРИПТІВ =====
+
+# Скрипт health check
+RUN mkdir -p $APP_DIR/scripts && cat > $APP_DIR/scripts/health_check.sh << 'EOF'
+#!/bin/bash
+# Health check скрипт для моніторингу стану бота
+
+while true; do
+    # Перевірка чи працює основний процес
+    if ! pgrep -f "python.*main.py" > /dev/null; then
+        echo "$(date): ❌ Bot process not found!"
+        # Можна додати логіку перезапуску
+    else
+        echo "$(date): ✅ Bot is running"
+    fi
+    
+    # Перевірка використання пам'яті
+    MEMORY_USAGE=$(ps aux | grep "python.*main.py" | grep -v grep | awk '{print $4}')
+    if [ ! -z "$MEMORY_USAGE" ]; then
+        echo "$(date): 💾 Memory usage: ${MEMORY_USAGE}%"
+    fi
+    
+    # Перевірка розміру логів
+    LOG_SIZE=$(du -sh /app/logs/*.log 2>/dev/null | awk '{print $1}' | head -1)
+    if [ ! -z "$LOG_SIZE" ]; then
+        echo "$(date): 📝 Log size: $LOG_SIZE"
+    fi
+    
+    sleep 300  # Перевірка кожні 5 хвилин
+done
+EOF
+
+# Скрипт запуску
+RUN cat > $APP_DIR/scripts/start.sh << 'EOF'
+#!/bin/bash
+# Стартовий скрипт для бота
+
+echo "🧠😂🔥 Starting Ukrainian Telegram Bot..."
+
+# Перевірка змінних середовища
+if [ -z "$BOT_TOKEN" ]; then
+    echo "❌ BOT_TOKEN is not set!"
+    exit 1
+fi
+
+if [ -z "$ADMIN_ID" ]; then
+    echo "⚠️ ADMIN_ID is not set, using default"
+    export ADMIN_ID=603047391
+fi
+
+# Створення необхідних директорій
+mkdir -p /app/data /app/logs /app/backups /app/media
+
+# Перевірка доступності бази даних
+if [ ! -z "$DATABASE_URL" ]; then
+    echo "💾 Testing database connection..."
+    # Тут можна додати тест підключення до БД
+fi
+
+# Запуск supervisor
+echo "🚀 Starting supervisor..."
+exec /usr/bin/supervisord -c /etc/supervisor/conf.d/bot.conf
+EOF
+
+# Скрипт зупинки
+RUN cat > $APP_DIR/scripts/stop.sh << 'EOF'
+#!/bin/bash
+# Скрипт graceful зупинки бота
+
+echo "🛑 Stopping Ukrainian Telegram Bot..."
+
+# Зупинка всіх процесів supervisor
+supervisorctl stop all
+
+# Очікування завершення процесів
+sleep 5
+
+# Примусова зупинка якщо потрібно
+pkill -f "python.*main.py" || true
+
+echo "✅ Bot stopped"
+EOF
+
+# Встановлення прав виконання для скриптів
+RUN chmod +x $APP_DIR/scripts/*.sh
+
+# ===== КОНФІГУРАЦІЯ ЛОГУВАННЯ =====
+
+# Створення конфігурації логування
+RUN cat > $APP_DIR/logging.conf << 'EOF'
+[loggers]
+keys=root,bot,database,automation
+
+[handlers]
+keys=consoleHandler,fileHandler
+
+[formatters]
+keys=detailedFormatter
+
+[logger_root]
+level=INFO
+handlers=consoleHandler,fileHandler
+
+[logger_bot]
+level=INFO
+handlers=consoleHandler,fileHandler
+qualname=bot
+propagate=0
+
+[logger_database]
+level=INFO
+handlers=consoleHandler,fileHandler
+qualname=database
+propagate=0
+
+[logger_automation]
+level=INFO
+handlers=consoleHandler,fileHandler
+qualname=automation
+propagate=0
+
+[handler_consoleHandler]
+class=StreamHandler
+level=INFO
+formatter=detailedFormatter
+args=(sys.stdout,)
+
+[handler_fileHandler]
+class=handlers.RotatingFileHandler
+level=INFO
+formatter=detailedFormatter
+args=('/app/logs/bot.log', 'a', 10485760, 5, 'utf-8')
+
+[formatter_detailedFormatter]
+format=%(asctime)s - %(name)s - %(levelname)s - %(message)s
+datefmt=%Y-%m-%d %H:%M:%S
+EOF
+
+# ===== НАЛАШТУВАННЯ БЕЗПЕКИ =====
+
+# Переключення на непривілейованого користувача
+USER $USER_NAME
+
+# ===== ПОРТИ ТА VOLUMES =====
+
+# Експонування портів
+EXPOSE 8000 9090
+
+# Volumes для даних
+VOLUME ["/app/data", "/app/logs", "/app/backups"]
+
+# ===== HEALTH CHECK =====
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# ===== ТОЧКА ВХОДУ =====
+
+# Встановлення робочої директорії
+WORKDIR $APP_DIR
+
+# Точка входу - стартовий скрипт
+ENTRYPOINT ["/app/scripts/start.sh"]
+
+# За замовчуванням - запуск через supervisor
+CMD ["supervisord", "-c", "/etc/supervisor/conf.d/bot.conf"]
+
+# ===== МЕТА ІНФОРМАЦІЯ =====
+
+# Додавання міток для кращої організації
+LABEL org.opencontainers.image.title="Ukrainian Telegram Bot"
+LABEL org.opencontainers.image.description="🧠😂🔥 Professional Ukrainian Telegram Bot with Full Automation"
+LABEL org.opencontainers.image.version="3.0.0"
+LABEL org.opencontainers.image.authors="Ukrainian Bot Team"
+LABEL org.opencontainers.image.url="https://github.com/your-repo/ukrainian-bot"
+LABEL org.opencontainers.image.source="https://github.com/your-repo/ukrainian-bot"
+LABEL org.opencontainers.image.vendor="Ukrainian Bot Team"
+LABEL org.opencontainers.image.licenses="MIT"
+
+# Інформація про розмір та використання
+LABEL org.opencontainers.image.documentation="See README.md for usage instructions"
+LABEL tech.stack="Python 3.11, aiogram 3.x, PostgreSQL, Alpine Linux"
+LABEL features="Automation, Content Management, Duels, Gamification, Moderation"
+
+# ===== НАЛАШТУВАННЯ MULTI-STAGE BUILD ДЛЯ PRODUCTION =====
+
+# Production образ (мінімальний)
+FROM base AS production
+
+# Видалення розробницьких залежностей
+USER root
+RUN apk del gcc musl-dev linux-headers postgresql-dev && \
+    rm -rf /var/cache/apk/* && \
+    pip uninstall -y setuptools wheel
+
+USER $USER_NAME
+
+# Development образ (з додатковими інструментами)
+FROM base AS development
+
+USER root
+
+# Додаткові інструменти для розробки
+RUN apk add --no-cache \
+    vim \
+    nano \
+    htop \
+    postgresql-dev \
+    && pip install --no-cache-dir \
+    pytest \
+    pytest-asyncio \
+    black \
+    flake8 \
+    mypy
+
+USER $USER_NAME
+
+# Встановлення змінної для development
+ENV ENVIRONMENT=development
+
+# ===== ІНСТРУКЦІЇ ПО ВИКОРИСТАННЮ =====
+
+# Build commands:
+# docker build -t ukrainian-bot:latest .
+# docker build --target production -t ukrainian-bot:prod .
+# docker build --target development -t ukrainian-bot:dev .
+
+# Run commands:
+# docker run -d --name ukrainian-bot \
+#   -e BOT_TOKEN=your_token \
+#   -e ADMIN_ID=your_admin_id \
+#   -e DATABASE_URL=your_db_url \
+#   -v bot_data:/app/data \
+#   -v bot_logs:/app/logs \
+#   -p 8000:8000 \
+#   ukrainian-bot:latest
+
+# Docker Compose usage:
+# See docker-compose.yml for complete configuration

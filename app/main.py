@@ -1,28 +1,37 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🤖 ПРОФЕСІЙНИЙ УКРАЇНОМОВНИЙ TELEGRAM-БОТ З ПОВНОЮ АВТОМАТИЗАЦІЄЮ 🤖
+🚀 ПОВНІСТЮ ВИПРАВЛЕНИЙ УКРАЇНОМОВНИЙ TELEGRAM-БОТ 🚀
 
 ВИПРАВЛЕННЯ:
-✅ Додано правильні typing імпорти
-✅ Виправлено aiohttp session cleanup
-✅ Покращена обробка БД помилок
+✅ Додано всі typing імпорти (List, Dict, Any)
+✅ Виправлено AutomatedScheduler аргументи
+✅ Правильне закриття aiohttp сесій
+✅ Покращена обробка помилок БД
+✅ Розширена система автоматизації
 """
 
 import asyncio
 import logging
 import sys
 import os
-from datetime import datetime
-from typing import Optional, List, Dict, Any  # ✅ ДОДАНО: List з typing
 import signal
+from datetime import datetime
+from typing import Optional, List, Dict, Any, Union  # ✅ ВИПРАВЛЕНО: всі typing імпорти
+import traceback
+
+# Додаємо app до Python path
+app_dir = os.path.dirname(os.path.abspath(__file__))
+if app_dir not in sys.path:
+    sys.path.insert(0, app_dir)
 
 # Telegram Bot API
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram import F
 
 # Logging setup
 logging.basicConfig(
@@ -34,7 +43,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class AutomatedUkrainianTelegramBot:
-    """Україномовний бот з повною автоматизацією"""
+    """Повністю автоматизований україномовний Telegram бот"""
     
     def __init__(self):
         self.bot = None
@@ -49,161 +58,167 @@ class AutomatedUkrainianTelegramBot:
         self.broadcast_system = None
         self.automation_active = False
         
+        # Налаштування з environment variables
+        self.bot_token = os.getenv("BOT_TOKEN")
+        self.admin_id = int(os.getenv("ADMIN_ID", "603047391"))
+        
+        if not self.bot_token:
+            logger.error("❌ BOT_TOKEN не знайдено в environment variables!")
+            sys.exit(1)
+        
+        logger.info("🧠😂🔥 Ініціалізація україномовного бота...")
+
     def is_admin(self, user_id: int) -> bool:
         """Перевірка чи користувач є адміністратором"""
-        try:
-            from config.settings import settings
-            admin_ids = [settings.ADMIN_ID]
-            if hasattr(settings, 'ADDITIONAL_ADMINS'):
-                admin_ids.extend(settings.ADDITIONAL_ADMINS)
-            return user_id in admin_ids
-        except ImportError:
-            admin_id = int(os.getenv('ADMIN_ID', 0))
-            return user_id == admin_id
+        return user_id == self.admin_id
 
-    async def load_settings(self):
-        """Завантаження налаштувань"""
-        logger.info("🔍 Завантаження налаштувань...")
-        
+    async def initialize_bot(self) -> bool:
+        """Ініціалізація бота та диспетчера"""
         try:
-            from config.settings import settings
-            logger.info("✅ Settings loaded from config.settings")
-            return settings
-        except ImportError:
-            logger.warning("⚠️ Using fallback settings from environment")
-            import types
-            fallback_settings = types.SimpleNamespace()
-            fallback_settings.BOT_TOKEN = os.getenv('BOT_TOKEN')
-            fallback_settings.ADMIN_ID = int(os.getenv('ADMIN_ID', 0))
-            fallback_settings.DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///bot.db')
-            fallback_settings.DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
-            return fallback_settings
-
-    async def initialize_bot(self, settings):
-        """Ініціалізація бота"""
-        logger.info("🤖 Створення бота...")
-        
-        if not settings.BOT_TOKEN:
-            logger.error("❌ BOT_TOKEN не встановлено!")
-            return False
-        
-        try:
+            logger.info("🤖 Ініціалізація Telegram бота...")
+            
+            # Створення бота з правильними налаштуваннями
             self.bot = Bot(
-                token=settings.BOT_TOKEN,
-                default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+                token=self.bot_token,
+                default=DefaultBotProperties(
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True
+                )
             )
             
-            # Перевірка з'єднання
-            bot_info = await self.bot.get_me()
-            logger.info(f"✅ Bot created: @{bot_info.username}")
-            
+            # Створення диспетчера
             self.dp = Dispatcher()
+            
+            # Перевірка підключення
+            bot_info = await self.bot.get_me()
+            logger.info(f"✅ Бот підключено: @{bot_info.username} ({bot_info.full_name})")
+            
             return True
             
         except Exception as e:
-            logger.error(f"❌ Bot creation failed: {e}")
+            logger.error(f"❌ Помилка ініціалізації бота: {e}")
             return False
 
-    async def initialize_database(self):
+    async def initialize_database(self) -> bool:
         """Ініціалізація бази даних"""
-        logger.info("💾 Ініціалізація БД...")
-        
         try:
-            # Спроба імпорту database модуля
-            import database
-            logger.info("✅ Database module imported successfully")
+            logger.info("💾 Ініціалізація бази даних...")
             
-            # Перевірка доступності основних функцій
-            required_functions = ['init_db', 'get_db_session']
-            missing_functions = []
-            
-            for func_name in required_functions:
-                if not hasattr(database, func_name):
-                    missing_functions.append(func_name)
-            
-            if missing_functions:
-                logger.warning(f"⚠️ Missing database functions: {missing_functions}")
-                return False
-            
-            # Ініціалізація БД
-            if hasattr(database, 'init_db'):
-                db_result = await database.init_db()
-                if db_result:
-                    logger.info("✅ Database initialized successfully")
-                    self.db_available = True
-                    return True
-                else:
-                    logger.warning("⚠️ Database initialization returned False")
-                    return False
-            else:
-                logger.warning("⚠️ init_db function not found")
-                return False
+            # Спроба імпорту та ініціалізації БД
+            try:
+                from database import init_db
+                self.db_available = await init_db()
                 
-        except ImportError as e:
-            logger.warning(f"⚠️ Database module not available: {e}")
-            logger.warning("⚠️ Working without full database support")
-            return False
+                if self.db_available:
+                    logger.info("✅ База даних ініціалізована успішно")
+                else:
+                    logger.warning("⚠️ База даних недоступна - працюємо в fallback режимі")
+                    
+            except ImportError as e:
+                logger.warning(f"⚠️ Database модуль недоступний: {e}")
+                self.db_available = False
+            except Exception as e:
+                logger.error(f"❌ Помилка ініціалізації БД: {e}")
+                self.db_available = False
+            
+            return True  # Завжди повертаємо True - бот може працювати без БД
+            
         except Exception as e:
-            logger.error(f"❌ Database initialization error: {e}")
+            logger.error(f"❌ Критична помилка БД: {e}")
             return False
 
-    async def initialize_automation(self):
+    async def initialize_automation(self) -> bool:
         """Ініціалізація системи автоматизації"""
         logger.info("🤖 Ініціалізація системи автоматизації...")
         
         try:
-            from services.automated_scheduler import AutomatedScheduler
-            from services.broadcast_system import BroadcastSystem
+            # Імпорт модулів автоматизації
+            from services.automated_scheduler import create_automated_scheduler
             
-            # Створення планувальника
-            self.scheduler = AutomatedScheduler(self.bot, self.db_available)
-            logger.info("✅ Automated scheduler створено")
+            # ✅ ВИПРАВЛЕНО: Передаємо правильні аргументи
+            self.scheduler = await create_automated_scheduler(self.bot, self.db_available)
             
-            # Створення системи розсилок
-            self.broadcast_system = BroadcastSystem(self.bot, self.db_available)
-            logger.info("✅ Broadcast system створено")
-            
-            # Запуск автоматизації
-            if await self.scheduler.start():
-                self.automation_active = True
-                logger.info("🤖 Повна автоматизація активна!")
-                logger.info("🤖 АВТОМАТИЗАЦІЯ АКТИВНА - бот працює самостійно!")
-                return True
+            if self.scheduler:
+                logger.info("✅ Automated scheduler створено")
+                
+                # Запуск планувальника
+                if await self.scheduler.start():
+                    self.automation_active = True
+                    logger.info("🤖 АВТОМАТИЗАЦІЯ АКТИВНА - бот працює самостійно!")
+                    
+                    # Логування статусу
+                    status = self.scheduler.get_scheduler_status()
+                    logger.info(f"📅 Запущено {status['jobs_count']} автоматичних завдань")
+                    
+                    return True
+                else:
+                    logger.warning("⚠️ Не вдалося запустити планувальник")
+                    return False
             else:
-                logger.warning("⚠️ Не вдалося запустити планувальник")
+                logger.warning("⚠️ Не вдалося створити планувальник")
                 return False
                 
         except ImportError as e:
-            logger.warning(f"⚠️ Automation services not available: {e}")
+            logger.warning(f"⚠️ Automation services недоступні: {e}")
+            logger.info("📄 Працюємо без автоматизації")
             return False
         except Exception as e:
-            logger.error(f"❌ Automation initialization error: {e}")
+            logger.error(f"❌ Помилка ініціалізації автоматизації: {e}")
+            logger.error(traceback.format_exc())
             return False
 
-    async def register_handlers(self):
-        """Реєстрація всіх хендлерів з автоматизацією"""
+    async def register_handlers(self) -> bool:
+        """Реєстрація всіх хендлерів"""
         try:
             logger.info("🔧 Реєстрація хендлерів з автоматизацією...")
             
-            # Реєстрація через handlers/__init__.py
-            from handlers import register_handlers
-            register_handlers(self.dp)
+            # Основні хендлери з handlers/__init__.py
+            try:
+                from handlers import register_handlers
+                register_handlers(self.dp)
+                logger.info("✅ Основні хендлери зареєстровано")
+            except Exception as e:
+                logger.error(f"❌ Помилка реєстрації основних хендлерів: {e}")
+                # Реєструємо fallback хендлери
+                await self._register_fallback_handlers()
             
-            # Додаткові основні хендлери з автоматизацією
-            await self.register_automation_handlers()
+            # Додаткові хендлери автоматизації
+            await self._register_automation_handlers()
             
             logger.info("✅ All handlers registered with automation support")
             return True
             
         except Exception as e:
             logger.error(f"❌ Handlers registration failed: {e}")
+            logger.error(traceback.format_exc())
             return False
 
-    async def register_automation_handlers(self):
+    async def _register_fallback_handlers(self):
+        """Реєстрація fallback хендлерів на випадок проблем з основними"""
+        
+        @self.dp.message(Command("start"))
+        async def fallback_start(message: Message):
+            """Fallback команда /start"""
+            await message.answer(
+                "🤖 <b>Україномовний бот активний!</b>\n\n"
+                "⚡ Базовий функціонал доступний\n"
+                "🔧 Використовуйте /help для довідки"
+            )
+        
+        @self.dp.message(Command("help"))
+        async def fallback_help(message: Message):
+            """Fallback команда /help"""
+            await message.answer(
+                "📚 <b>Довідка по боту:</b>\n\n"
+                "🤖 /start - Головне меню\n"
+                "📊 /status - Статус автоматизації\n"
+                "🛡️ /admin - Адмін панель (тільки для адміністраторів)"
+            )
+        
+        logger.info("✅ Fallback хендлери зареєстровано")
+
+    async def _register_automation_handlers(self):
         """Хендлери з підтримкою автоматизації"""
-        from aiogram import F
-        from aiogram.filters import Command
-        from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
         
         @self.dp.message(Command("start"))
         async def automated_start(message: Message):
@@ -218,12 +233,13 @@ class AutomatedUkrainianTelegramBot:
                     await get_or_create_user(
                         telegram_id=user_id,
                         username=message.from_user.username,
-                        first_name=first_name
+                        first_name=first_name,
+                        last_name=message.from_user.last_name
                     )
                 except Exception as e:
-                    logger.warning(f"⚠️ User registration failed: {e}")
+                    logger.error(f"❌ Помилка реєстрації користувача: {e}")
             
-            # Основне меню
+            # Створення меню
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
@@ -239,82 +255,76 @@ class AutomatedUkrainianTelegramBot:
                 ],
                 [
                     InlineKeyboardButton(text="🚀 Масові дії", callback_data="bulk_actions"),
-                    InlineKeyboardButton(text="📦 Бекап", callback_data="backup")
+                    InlineKeyboardButton(text="💾 Бекап", callback_data="backup")
+                ],
+                [
+                    InlineKeyboardButton(text="🤖 Автоматизація", callback_data="automation"),
+                    InlineKeyboardButton(text="📢 Розсилки", callback_data="broadcasts")
+                ],
+                [
+                    InlineKeyboardButton(text="❌ Вимкнути адмін меню", callback_data="disable_admin_menu")
                 ]
             ])
             
-            # Додавання кнопки автоматизації для адміна
-            if self.is_admin(user_id):
-                keyboard.inline_keyboard.append([
-                    InlineKeyboardButton(text="🤖 Автоматизація", callback_data="automation"),
-                    InlineKeyboardButton(text="📢 Розсилки", callback_data="broadcasts")
-                ])
-                keyboard.inline_keyboard.append([
-                    InlineKeyboardButton(text="❌ Вимкнути адмін меню", callback_data="disable_admin_menu")
-                ])
+            automation_status = "Активна" if self.automation_active else "Неактивна"
+            db_status = "Підключена" if self.db_available else "Fallback режим"
             
-            text = (
-                f"🤖 <b>Вітаю, {first_name}!</b>\n\n"
-                f"🧠😂🔥 <b>АВТОМАТИЗАЦІЯ АКТИВНА</b>\n\n"
-                f"✅ Планувальник запущено\n"
-                f"📝 Завдань у черзі: {len(self.scheduler.get_jobs()) if self.scheduler else 0}\n\n"
-                f"🎯 <b>Автоматичні функції:</b>\n"
-                f"• Щоденні розсилки контенту\n"
-                f"• Автоматичне завершення дуелей\n"
-                f"• Нагадування та сповіщення\n"
-                f"• Очистка та оптимізація\n"
-                f"• Тижневі та місячні звіти\n\n"
-                f"📋 Оберіть дію з меню:"
+            welcome_text = (
+                f"🧠😂🔥 <b>Вітаю, {first_name}!</b>\n\n"
+                f"🤖 <b>Україномовний бот з автоматизацією</b>\n\n"
+                f"📊 <b>Статус системи:</b>\n"
+                f"⚡ Автоматизація: {automation_status}\n"
+                f"💾 База даних: {db_status}\n"
+                f"🕐 Запущено: {self.startup_time.strftime('%d.%m.%Y %H:%M')}\n\n"
+                f"🎯 <b>Основні функції:</b>\n"
+                f"• 😂 Меми та жарти\n"
+                f"• ⚔️ Дуелі жартів\n"
+                f"• 🤖 Автоматичні розсилки\n"
+                f"• 📊 Детальна статистика\n"
+                f"• 🛡️ Система модерації\n\n"
+                f"Оберіть дію з меню нижче:"
             )
             
-            await message.answer(text, reply_markup=keyboard)
-            
-            # Повідомлення адміну про запуск
-            if self.is_admin(user_id) and self.automation_active:
-                admin_text = (
-                    f"✅ <b>Бот запущено в професійному режимі!</b>\n\n"
-                    f"🤖 <b>Автоматизація:</b>\n"
-                    f"📅 Налаштовано всі автоматичні завдання\n"
-                    f"💾 База даних: {'Підключена' if self.db_available else 'Fallback'}\n"
-                    f"🎯 Доступні функції: профіль, статистика, топ користувачів\n\n"
-                    f"🔧 <b>Адмін функції:</b>\n"
-                    f"/automation_status - статус планувальника\n"
-                    f"/broadcast_now - ручна розсилка\n"
-                    f"/scheduler_info - інформація про завдання"
-                )
-                await message.answer(admin_text)
+            await message.answer(welcome_text, reply_markup=keyboard)
 
-        @self.dp.message(Command("automation_status"))
+        @self.dp.message(Command("status"))
         async def automation_status(message: Message):
-            """Статус автоматизації (тільки адмін)"""
-            if not self.is_admin(message.from_user.id):
-                await message.answer("❌ Недостатньо прав")
-                return
-            
+            """Статус автоматизації"""
             if self.scheduler:
-                jobs = self.scheduler.get_jobs()
+                status = self.scheduler.get_scheduler_status()
+                jobs = self.scheduler.get_jobs_info()
+                
                 status_text = (
                     f"🤖 <b>СТАТУС АВТОМАТИЗАЦІЇ</b>\n\n"
-                    f"⚡ Планувальник: {'Активний' if self.automation_active else 'Неактивний'}\n"
-                    f"📅 Завдань: {len(jobs)}\n"
-                    f"💾 База даних: {'Підключена' if self.db_available else 'Fallback'}\n"
-                    f"⏰ Запущено: {self.startup_time.strftime('%H:%M:%S')}\n\n"
-                    f"📋 <b>Активні завдання:</b>\n"
+                    f"⚡ Планувальник: {'Активний' if status['is_running'] else 'Неактивний'}\n"
+                    f"💾 База даних: {'Доступна' if status['db_available'] else 'Недоступна'}\n"
+                    f"📅 Завдань: {status['jobs_count']}\n"
+                    f"⏱️ Час роботи: {status['uptime_hours']:.1f} год\n\n"
+                    f"📊 <b>Статистика:</b>\n"
+                    f"• Виконано завдань: {status['stats']['jobs_executed']}\n"
+                    f"• Помилок: {status['stats']['jobs_failed']}\n"
+                    f"• Розсилок: {status['stats']['broadcasts_sent']}\n\n"
                 )
                 
-                for job in jobs[:5]:  # Показуємо перші 5
-                    status_text += f"• {job.name}\n"
-                
-                if len(jobs) > 5:
-                    status_text += f"... та ще {len(jobs) - 5} завдань"
+                if jobs:
+                    status_text += f"📋 <b>Наступні завдання:</b>\n"
+                    for job in jobs[:5]:  # Показуємо перші 5
+                        status_text += f"• {job['name']}\n"
                     
+                    if len(jobs) > 5:
+                        status_text += f"... та ще {len(jobs) - 5} завдань"
+                        
             else:
                 status_text = "❌ Планувальник не ініціалізований"
             
             await message.answer(status_text)
 
         # Callback обробник
-        @self.dp.callback_query(F.data.startswith(("stats", "moderation", "users", "content", "trending", "settings", "bulk_actions", "backup", "automation", "broadcasts", "disable_admin_menu")))
+        @self.dp.callback_query(F.data.startswith((
+            "stats", "moderation", "users", "content", "trending", 
+            "settings", "bulk_actions", "backup", "automation", 
+            "broadcasts", "disable_admin_menu"
+        )))
         async def enhanced_callback_handler(callback: CallbackQuery):
             """Розширений callback обробник з автоматизацією"""
             await callback.answer()
@@ -324,7 +334,9 @@ class AutomatedUkrainianTelegramBot:
             
             if data == "automation" and self.is_admin(user_id):
                 if self.scheduler:
-                    jobs = self.scheduler.get_jobs()
+                    status = self.scheduler.get_scheduler_status()
+                    jobs = self.scheduler.get_jobs_info()
+                    
                     text = (
                         f"🤖 <b>АВТОМАТИЗАЦІЯ</b>\n\n"
                         f"⚡ Статус: {'Активна' if self.automation_active else 'Неактивна'}\n"
@@ -334,139 +346,157 @@ class AutomatedUkrainianTelegramBot:
                     )
                     
                     for job in jobs:
-                        next_run = job.next_run_time
-                        if next_run:
-                            text += f"• {job.name}: {next_run.strftime('%H:%M')}\n"
+                        if job['next_run']:
+                            next_run = datetime.fromisoformat(job['next_run']).strftime('%H:%M')
+                            text += f"• {job['name']}: {next_run}\n"
                         else:
-                            text += f"• {job.name}: не заплановано\n"
+                            text += f"• {job['name']}: інтервальне\n"
                     
                     keyboard = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text="🔄 Перезапустити", callback_data="restart_automation")],
-                        [InlineKeyboardButton(text="⏸️ Призупинити", callback_data="pause_automation")],
-                        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
+                        [InlineKeyboardButton(text="⏹️ Зупинити", callback_data="stop_automation")],
+                        [InlineKeyboardButton(text="📊 Детальна статистика", callback_data="detailed_stats")],
+                        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]
                     ])
                     
                     await callback.message.edit_text(text, reply_markup=keyboard)
                 else:
-                    await callback.message.edit_text("❌ Планувальник не ініціалізований")
+                    await callback.message.edit_text("❌ Автоматизація недоступна")
             
             elif data == "broadcasts" and self.is_admin(user_id):
                 text = (
                     f"📢 <b>СИСТЕМА РОЗСИЛОК</b>\n\n"
-                    f"🎯 Автоматичні розсилки:\n"
-                    f"• 🌅 Ранкова (9:00) - найкращий контент\n"
-                    f"• 🌆 Вечірня (20:00) - статистика дня\n"
-                    f"• 📊 Тижнева (неділя 18:00) - дайджест\n"
-                    f"• 🏆 Місячна (1 число) - підсумки\n\n"
-                    f"📋 Ручні дії:"
+                    f"📊 Статистика розсилок:\n"
+                    f"• Відправлено сьогодні: {self.stats.get('broadcasts_sent', 0) if hasattr(self, 'stats') else 'N/A'}\n"
+                    f"• Активних підписників: N/A\n"
+                    f"• Остання розсилка: N/A\n\n"
+                    f"🕐 Автоматичні розсилки:\n"
+                    f"• 9:00 - Ранковий контент\n"
+                    f"• 20:00 - Вечірня статистика\n"
+                    f"• П'ятниця 19:00 - Тижневий турнір\n"
+                    f"• Неділя 18:00 - Тижневий дайджест"
                 )
                 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="📤 Розіслати зараз", callback_data="broadcast_now")],
-                    [InlineKeyboardButton(text="📊 Статистика розсилок", callback_data="broadcast_stats")],
-                    [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
+                    [InlineKeyboardButton(text="📤 Тестова розсилка", callback_data="test_broadcast")],
+                    [InlineKeyboardButton(text="📋 Список підписників", callback_data="subscribers_list")],
+                    [InlineKeyboardButton(text="⚙️ Налаштування розсилок", callback_data="broadcast_settings")],
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]
                 ])
                 
                 await callback.message.edit_text(text, reply_markup=keyboard)
             
-            elif data == "stats":
-                stats_text = (
-                    f"📊 <b>СТАТИСТИКА БОТА</b>\n\n"
-                    f"⏰ Час роботи: {datetime.now() - self.startup_time}\n"
-                    f"💾 БД: {'Підключена' if self.db_available else 'Недоступна'}\n"
-                    f"🤖 Автоматизація: {'Активна' if self.automation_active else 'Неактивна'}\n"
-                    f"📅 Планувальник: {len(self.scheduler.get_jobs()) if self.scheduler else 0} завдань\n\n"
-                    f"🎯 Використовуйте інші кнопки для деталей!"
-                )
-                await callback.message.edit_text(stats_text)
-            
             else:
-                await callback.message.edit_text(f"🔧 Функція '{data}' в розробці!\n\n🤖 Автоматизація активна та працює у фоні.")
-        
+                # Стандартна обробка інших callback'ів
+                await callback.message.edit_text(f"🔧 Функція '{data}' в розробці")
+
         logger.info("✅ Automation handlers зареєстровано")
 
     async def cleanup(self):
-        """Правильне закриття ресурсів"""
+        """Очистка ресурсів перед завершенням"""
         logger.info("🧹 Cleanup resources...")
         
         try:
-            # Закриття планувальника
+            # Зупинка автоматизації
             if self.scheduler:
                 await self.scheduler.stop()
-                logger.info("✅ Scheduler stopped")
+                logger.info("⏹️ Планувальник зупинено")
             
-            # Закриття aiohttp сесії бота (виправлення помилки Unclosed client session)
+            # ✅ ВИПРАВЛЕНО: Правильне закриття aiohttp сесії
             if self.bot and hasattr(self.bot, 'session') and self.bot.session:
-                await self.bot.session.close()
-                logger.info("✅ Bot session closed")
+                if not self.bot.session.closed:
+                    await self.bot.session.close()
+                    logger.info("✅ Bot session closed")
             
         except Exception as e:
-            logger.error(f"❌ Cleanup error: {e}")
+            logger.error(f"❌ Помилка cleanup: {e}")
 
-    async def main(self):
-        """Головна функція"""
-        logger.info("🤖 Starting Automated Ukrainian Telegram Bot...")
-        
+    async def run(self):
+        """Основний цикл роботи бота"""
         try:
-            # Завантаження налаштувань
-            settings = await self.load_settings()
+            logger.info("🚀 Запуск україномовного бота з повною автоматизацією...")
             
-            # Ініціалізація бота
-            if not await self.initialize_bot(settings):
-                logger.error("❌ Failed to initialize bot")
-                return False
+            # Ініціалізація всіх компонентів
+            if not await self.initialize_bot():
+                logger.error("❌ Не вдалося ініціалізувати бота")
+                return
             
-            # Ініціалізація БД
-            db_success = await self.initialize_database()
-            if not db_success:
-                logger.warning("⚠️ Working without full database support")
+            if not await self.initialize_database():
+                logger.error("❌ Не вдалося ініціалізувати БД")
+                return
             
-            # Ініціалізація автоматизації
             automation_success = await self.initialize_automation()
             if automation_success:
-                logger.info("🤖 АВТОМАТИЗАЦІЯ АКТИВНА!")
+                logger.info("🤖 Автоматизація активна!")
             else:
                 logger.warning("⚠️ Working without automation")
             
-            # Реєстрація хендлерів
             if not await self.register_handlers():
-                logger.error("❌ Failed to register handlers")
-                return False
+                logger.error("❌ Не вдалося зареєструвати хендлери")
+                return
             
-            logger.info("✅ Bot fully initialized with automation support")
-            
-            # Обробник сигналів для graceful shutdown
+            # Налаштування обробки сигналів для graceful shutdown
             def signal_handler():
-                logger.info("🛑 Received shutdown signal")
+                logger.info("🛑 Отримано сигнал зупинки")
                 self.shutdown_event.set()
             
-            if sys.platform != 'win32':
-                signal.signal(signal.SIGTERM, lambda s, f: signal_handler())
+            if hasattr(signal, 'SIGINT'):
                 signal.signal(signal.SIGINT, lambda s, f: signal_handler())
+            if hasattr(signal, 'SIGTERM'):
+                signal.signal(signal.SIGTERM, lambda s, f: signal_handler())
             
-            # Запуск polling з graceful shutdown
-            try:
-                await self.dp.start_polling(self.bot)
-            except KeyboardInterrupt:
-                logger.info("⏹️ Bot stopped by user")
+            # Запуск polling
+            logger.info("🎯 Bot fully initialized with automation support")
+            logger.info("🚀 Starting polling...")
+            
+            # Створення task для polling
+            polling_task = asyncio.create_task(
+                self.dp.start_polling(self.bot, allowed_updates=["message", "callback_query"])
+            )
+            
+            # Створення task для очікування shutdown
+            shutdown_task = asyncio.create_task(self.shutdown_event.wait())
+            
+            # Очікування завершення одного з task'ів
+            done, pending = await asyncio.wait(
+                [polling_task, shutdown_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            # Скасування незавершених task'ів
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            
+            logger.info("🛑 Бот завершує роботу...")
             
         except Exception as e:
-            logger.error(f"❌ Critical error: {e}")
-            return False
+            logger.error(f"❌ Критична помилка запуску: {e}")
+            logger.error(traceback.format_exc())
         finally:
-            # Cleanup ресурсів
             await self.cleanup()
 
+# ===== ГОЛОВНА ФУНКЦІЯ =====
 async def main():
-    """Точка входу"""
-    bot = AutomatedUkrainianTelegramBot()
-    await bot.main()
+    """Головна функція запуску бота"""
+    try:
+        bot = AutomatedUkrainianTelegramBot()
+        await bot.run()
+    except KeyboardInterrupt:
+        logger.info("🛑 Бот зупинено користувачем")
+    except Exception as e:
+        logger.error(f"💥 Критична помилка: {e}")
+        logger.error(traceback.format_exc())
 
 if __name__ == "__main__":
+    # ✅ ВИПРАВЛЕНО: Правильний запуск async функції
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("⏹️ Program interrupted")
+        logger.info("🛑 Програма завершена")
     except Exception as e:
-        logger.error(f"❌ Unhandled exception: {e}")
+        logger.error(f"💥 Фатальна помилка: {e}")
         sys.exit(1)
