@@ -104,11 +104,22 @@ class UkrainianTelegramBot:
             return False
     
     async def setup_handlers(self):
+        """Налаштування всіх хендлерів включно з контентом"""
         try:
             from aiogram.filters import Command
             from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
             
-            # Enhanced start command with user registration
+            # Реєстрація всіх хендлерів з handlers/
+            try:
+                from handlers import register_all_handlers
+                register_all_handlers(self.dp)
+                logger.info("✅ All handlers from handlers/ registered")
+            except ImportError:
+                logger.warning("⚠️ handlers/ package not available")
+            except Exception as e:
+                logger.error(f"❌ Error registering handlers: {e}")
+            
+            # Основні команди (залишаються тут для стабільності)
             @self.dp.message(Command("start"))
             async def cmd_start(message: Message):
                 try:
@@ -125,22 +136,43 @@ class UkrainianTelegramBot:
                         if user_data:
                             logger.info(f"User registered/updated: {message.from_user.id}")
                     
-                    # Підготовка тексту
+                    # Підготовка тексту з інформацією про новий контент
                     if self.settings:
                         from config.settings import TEXTS
                         text = TEXTS['start_message']
                     else:
-                        text = f"🧠😂🔥 <b>Привіт! Я професійний україномовний бот!</b>\n\n{'💾 База даних: підключена' if self.db_available else '⚠️ База даних: недоступна'}\n\n⚡ <b>Доступні команди:</b>\n/start - запуск\n/status - статус\n/profile - профіль\n/stats - статистика\n/help - допомога"
+                        text = (
+                            f"🧠😂🔥 <b>Привіт! Я професійний україномовний бот!</b>\n\n"
+                            f"🎭 <b>Новий контент доступний:</b>\n"
+                            f"😂 /meme - випадкові меми\n"
+                            f"🤣 /joke - смішні жарти\n"
+                            f"🧠 /anekdot - українські анекдоти\n\n"
+                            f"📝 <b>Можете подавати свій контент через кнопки!</b>\n\n"
+                            f"{'💾 База даних: підключена' if self.db_available else '⚠️ База даних: недоступна'}\n\n"
+                            f"⚡ <b>Всі команди:</b>\n"
+                            f"/start - запуск\n/status - статус\n/profile - профіль\n"
+                            f"/meme - мем\n/joke - жарт\n/anekdot - анекдот"
+                        )
                     
-                    # Створення клавіатури
+                    # Створення розширеної клавіатури з контентом
                     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="👤 Мій профіль", callback_data="profile")],
-                        [InlineKeyboardButton(text="😂 Випадковий мем", callback_data="meme")],
-                        [InlineKeyboardButton(text="🏆 Топ користувачів", callback_data="top")],
-                        [InlineKeyboardButton(text="⚔️ Дуель жартів", callback_data="duel")],
-                        [InlineKeyboardButton(text="📝 Подати жарт", callback_data="submit")],
-                        [InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
-                        [InlineKeyboardButton(text="❓ Допомога", callback_data="help")]
+                        [
+                            InlineKeyboardButton(text="😂 Мем", callback_data="get_meme"),
+                            InlineKeyboardButton(text="🤣 Жарт", callback_data="get_joke"),
+                            InlineKeyboardButton(text="🧠 Анекдот", callback_data="get_anekdot")
+                        ],
+                        [
+                            InlineKeyboardButton(text="👤 Мій профіль", callback_data="profile"),
+                            InlineKeyboardButton(text="🏆 Топ користувачів", callback_data="top")
+                        ],
+                        [
+                            InlineKeyboardButton(text="📝 Подати мем", callback_data="submit_demo_meme"),
+                            InlineKeyboardButton(text="📝 Подати жарт", callback_data="submit_demo_joke")
+                        ],
+                        [
+                            InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
+                            InlineKeyboardButton(text="❓ Допомога", callback_data="help")
+                        ]
                     ])
                     
                     await message.answer(text, reply_markup=keyboard)
@@ -160,13 +192,15 @@ class UkrainianTelegramBot:
                 if self.settings:
                     status_text += f"⚙️ Конфігурація: повна\n"
                     status_text += f"💾 База даних: {'✅ активна' if self.db_available else '❌ недоступна'}\n"
-                    status_text += f"🔧 Режим: професійний\n"
+                    status_text += f"🎭 Контент: меми, жарти, анекдоти\n"
+                    status_text += f"🔧 Режим: професійний з контентом\n"
                 else:
                     status_text += f"⚙️ Конфігурація: базова\n"
                     status_text += f"🔧 Режим: мінімальний\n"
                 
                 await message.answer(status_text)
             
+            # Інші основні команди (profile, stats, help) залишаються без змін...
             @self.dp.message(Command("profile"))
             async def cmd_profile(message: Message):
                 if not self.db_available:
@@ -225,29 +259,62 @@ class UkrainianTelegramBot:
             @self.dp.message(Command("help"))
             async def cmd_help(message: Message):
                 try:
-                    if self.settings:
-                        from config.settings import TEXTS
-                        text = TEXTS.get('help_message', "📖 Довідка буде додана скоро!")
-                    else:
-                        text = "📖 <b>Довідка</b>\n\n/start - запуск бота\n/status - статус системи\n/profile - ваш профіль\n/stats - статистика бота\n/help - ця довідка"
+                    help_text = (
+                        "📖 <b>Довідка по командах</b>\n\n"
+                        "🎭 <b>Контент:</b>\n"
+                        "/meme - випадковий мем\n"
+                        "/joke - смішний жарт\n"
+                        "/anekdot - український анекдот\n\n"
+                        "👤 <b>Профіль:</b>\n"
+                        "/profile - ваш профіль\n"
+                        "/stats - статистика бота\n\n"
+                        "⚙️ <b>Система:</b>\n"
+                        "/start - перезапуск\n"
+                        "/status - статус бота\n"
+                        "/help - ця довідка\n\n"
+                        "📝 <b>Подача контенту через кнопки в меню!</b>"
+                    )
                     
-                    await message.answer(text)
+                    await message.answer(help_text)
                 except Exception as e:
                     logger.error(f"Error in help handler: {e}")
                     await message.answer("📖 <b>Довідка</b>\n\nБазові команди: /start, /status, /profile, /stats, /help")
             
-            # Enhanced callback handlers with DB integration
+            # Callback handlers з інтеграцією контенту
             @self.dp.callback_query()
-            async def handle_callbacks(callback):
+            async def handle_main_callbacks(callback):
+                """Основні callback'и (не контентні, які обробляються в content_handlers)"""
                 try:
                     data = callback.data
                     
-                    if data == "profile":
+                    # Перевіряємо чи це не контентний callback (вони обробляються в content_handlers)
+                    if any(data.startswith(prefix) for prefix in ["like_", "dislike_", "more_", "submit_"]):
+                        return  # Нехай обробляє content_handlers
+                    
+                    if data == "get_meme":
+                        # Викликаємо обробник мемів
+                        from handlers.content_handlers import handle_meme_command
+                        await handle_meme_command(callback.message)
+                        await callback.answer()
+                        
+                    elif data == "get_joke":
+                        # Викликаємо обробник жартів
+                        from handlers.content_handlers import handle_joke_command
+                        await handle_joke_command(callback.message)
+                        await callback.answer()
+                        
+                    elif data == "get_anekdot":
+                        # Викликаємо обробник анекдотів
+                        from handlers.content_handlers import handle_anekdot_command
+                        await handle_anekdot_command(callback.message)
+                        await callback.answer()
+                    
+                    elif data == "profile":
                         if self.db_available:
                             from database.services import get_user_stats
                             user_stats = get_user_stats(callback.from_user.id)
                             if user_stats:
-                                await callback.message.answer(f"👤 Ваш профіль:\n⭐ Бали: {user_stats['points']}\n👑 Ранг: {user_stats['rank']}")
+                                await callback.message.answer(f"👤 <b>Ваш профіль:</b>\n⭐ Бали: {user_stats['points']}\n👑 Ранг: {user_stats['rank']}")
                             else:
                                 await callback.message.answer("❌ Профіль не знайдено")
                         else:
@@ -258,7 +325,7 @@ class UkrainianTelegramBot:
                         if self.db_available:
                             from database.services import get_basic_stats
                             stats = get_basic_stats()
-                            await callback.message.answer(f"📊 Статистика:\n👥 Користувачів: {stats['total_users']}\n📝 Контенту: {stats['total_content']}")
+                            await callback.message.answer(f"📊 <b>Статистика:</b>\n👥 Користувачів: {stats['total_users']}\n📝 Контенту: {stats['total_content']}")
                         else:
                             await callback.message.answer("❌ База даних недоступна")
                         await callback.answer()
@@ -279,23 +346,24 @@ class UkrainianTelegramBot:
                             await callback.message.answer("❌ База даних недоступна")
                         await callback.answer()
                         
-                    elif data == "meme":
-                        await callback.answer("😂 Меми будуть додані в наступному кроці!")
-                    elif data == "duel":
-                        await callback.answer("⚔️ Дуелі будуть додані скоро!")
-                    elif data == "submit":
-                        await callback.answer("📝 Подача контенту буде додана скоро!")
                     elif data == "help":
-                        await callback.message.answer("📖 <b>Допомога</b>\n\nДоступні команди:\n/start - запуск\n/profile - профіль\n/stats - статистика\n\nВсі функції поступово додаються!")
+                        await callback.message.answer(
+                            "📖 <b>Допомога</b>\n\n"
+                            "🎭 Використовуйте кнопки для отримання контенту!\n"
+                            "📝 Подавайте свій контент через відповідні кнопки\n"
+                            "⭐ Заробляйте бали за активність\n"
+                            "🏆 Змагайтеся в рейтингу!\n\n"
+                            "Всі функції працюють та постійно розширюються!"
+                        )
                         await callback.answer()
                     else:
                         await callback.answer("🚧 Функція в розробці!")
                         
                 except Exception as e:
-                    logger.error(f"Callback error: {e}")
+                    logger.error(f"Main callback error: {e}")
                     await callback.answer("❌ Помилка обробки!")
             
-            logger.info("✅ Enhanced handlers with DB integration registered")
+            logger.info("✅ Enhanced handlers with content system registered")
             return True
             
         except Exception as e:
@@ -303,7 +371,7 @@ class UkrainianTelegramBot:
             return False
     
     async def main(self):
-        logger.info("🚀 Starting Enhanced Ukrainian Telegram Bot with Database...")
+        logger.info("🚀 Starting Enhanced Ukrainian Telegram Bot with Content System...")
         
         try:
             # Load settings
@@ -326,7 +394,7 @@ class UkrainianTelegramBot:
             # Notify admin
             if settings.get('admin_id') and self.bot:
                 try:
-                    mode = "професійному" if self.settings else "базовому"
+                    mode = "професійному з контентом" if self.settings else "базовому"
                     db_status = "підключена" if self.db_available else "недоступна"
                     
                     await self.bot.send_message(
@@ -334,13 +402,18 @@ class UkrainianTelegramBot:
                         f"✅ <b>Бот запущено в {mode} режимі!</b>\n\n"
                         f"🕐 Час: {datetime.now().strftime('%H:%M:%S')}\n"
                         f"⚙️ Налаштування: {'повні' if self.settings else 'базові'}\n"
-                        f"💾 База даних: {db_status}\n"
-                        f"🎯 Доступні функції: профіль, статистика, топ користувачів"
+                        f"💾 База даних: {db_status}\n\n"
+                        f"🎭 <b>Новий контент:</b>\n"
+                        f"😂 Меми (/meme)\n"
+                        f"🤣 Жарти (/joke)\n"
+                        f"🧠 Анекдоти (/anekdot)\n"
+                        f"📝 Подача контенту через кнопки\n"
+                        f"⭐ Система балів за активність"
                     )
                 except Exception as e:
                     logger.warning(f"Could not notify admin: {e}")
             
-            logger.info("🎯 Starting polling...")
+            logger.info("🎯 Starting polling with content system...")
             await self.dp.start_polling(self.bot, skip_updates=True)
             
             return True
