@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+🧠😂🔥 ПРОФЕСІЙНИЙ УКРАЇНОМОВНИЙ TELEGRAM-БОТ З ДУЕЛЯМИ 🧠😂🔥
+
+НОВИНКИ В КРОЦІ 5:
+⚔️ Повна система дуелів жартів
+🗳️ Голосування за найкращий контент  
+🏆 Рейтингова система дуелістів
+🎯 Автоматичне завершення дуелів
+📊 Розширена статистика та ранги
+"""
 
 import asyncio
 import logging
@@ -7,528 +17,605 @@ import sys
 import os
 from datetime import datetime
 from typing import Optional
+import signal
 
 # Logging setup
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 
 logger = logging.getLogger(__name__)
 
-class UkrainianTelegramBot:
+class UkrainianTelegramBotWithDuels:
+    """Україномовний бот з повною системою дуелів"""
     
     def __init__(self):
         self.bot = None
         self.dp = None
         self.startup_time = datetime.now()
-        self.settings = None
         self.db_available = False
-    
-    def load_settings(self):
-        """Завантаження налаштувань з config.settings або env"""
+        self.handlers_status = {}
+        self.shutdown_event = asyncio.Event()
+        
+    def is_admin(self, user_id: int) -> bool:
+        """Перевірка чи користувач є адміністратором"""
         try:
             from config.settings import settings
-            self.settings = settings
-            logger.info("✅ Settings loaded from config.settings")
-            return {
-                'bot_token': settings.BOT_TOKEN,
-                'admin_id': settings.ADMIN_ID,
-                'database_url': settings.DATABASE_URL,
-                'debug': settings.DEBUG
-            }
-        except ImportError:
-            logger.warning("⚠️ config.settings not available, using env variables")
-            return {
-                'bot_token': os.getenv('BOT_TOKEN'),
-                'admin_id': int(os.getenv('ADMIN_ID', 0)),
-                'database_url': os.getenv('DATABASE_URL', 'sqlite:///bot.db'),
-                'debug': os.getenv('DEBUG', 'False').lower() == 'true'
-            }
-    
-    def validate_settings(self, settings):
-        if not settings.get('bot_token'):
-            logger.error("❌ BOT_TOKEN not found!")
-            return False
-        if not settings.get('admin_id'):
-            logger.error("❌ ADMIN_ID not found!")
-            return False
-        return True
-    
-    def is_admin(self, user_id: int) -> bool:
-        """Перевірка чи є користувач адміністратором"""
-        try:
-            if self.settings:
-                return self.settings.is_admin(user_id)
-            else:
-                admin_id = int(os.getenv('ADMIN_ID', 0))
-                return user_id == admin_id
+            admin_ids = [settings.ADMIN_ID]
+            if hasattr(settings, 'ADDITIONAL_ADMINS'):
+                admin_ids.extend(settings.ADDITIONAL_ADMINS)
+            return user_id in admin_ids
         except:
-            return False
-    
-    async def init_database(self, database_url: str):
-        """Ініціалізація бази даних з новими сервісами"""
+            return user_id == 603047391  # Fallback admin ID
+
+    async def initialize_bot(self):
+        """Ініціалізація бота з повною підтримкою дуелів"""
         try:
-            from database.services import init_database, test_database_connection
+            logger.info("🔍 Завантаження налаштувань...")
             
-            # Ініціалізація БД
-            if init_database(database_url):
-                # Тестування з'єднання
-                if test_database_connection():
-                    self.db_available = True
-                    logger.info("✅ Database fully operational")
-                    return True
-                else:
-                    logger.warning("⚠️ Database initialized but connection test failed")
-                    return False
-            else:
-                logger.error("❌ Database initialization failed")
-                return False
+            # Завантаження конфігурації
+            try:
+                from config.settings import settings
+                bot_token = settings.BOT_TOKEN
+                logger.info("✅ Settings loaded from config.settings")
+            except ImportError:
+                bot_token = os.getenv('BOT_TOKEN')
+                logger.warning("⚠️ Using environment BOT_TOKEN")
             
-        except ImportError:
-            logger.warning("⚠️ Database services not available, working without DB")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Database error: {e}")
-            return False
-    
-    async def create_bot(self, settings):
-        try:
+            if not bot_token:
+                raise ValueError("BOT_TOKEN not found")
+            
+            # Ініціалізація aiogram
             from aiogram import Bot, Dispatcher
-            from aiogram.enums import ParseMode
             from aiogram.client.default import DefaultBotProperties
+            from aiogram.enums import ParseMode
             
             self.bot = Bot(
-                token=settings['bot_token'],
+                token=bot_token,
                 default=DefaultBotProperties(parse_mode=ParseMode.HTML)
             )
-            
             self.dp = Dispatcher()
             
             bot_info = await self.bot.get_me()
             logger.info(f"✅ Bot created: @{bot_info.username}")
+            
             return True
             
         except Exception as e:
-            logger.error(f"❌ Bot creation error: {e}")
+            logger.error(f"❌ Bot initialization failed: {e}")
             return False
-    
-    async def setup_handlers(self):
-        """Налаштування всіх хендлерів включно з контентом та адміном"""
+
+    async def initialize_database(self):
+        """Ініціалізація бази даних з підтримкою дуелів"""
         try:
-            from aiogram.filters import Command
-            from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+            logger.info("💾 Ініціалізація БД з підтримкою дуелів...")
             
-            # Реєстрація всіх хендлерів з handlers/
-            try:
-                from handlers import register_all_handlers
-                register_all_handlers(self.dp)
-                logger.info("✅ All handlers from handlers/ registered")
-            except ImportError:
-                logger.warning("⚠️ handlers/ package not available")
-            except Exception as e:
-                logger.error(f"❌ Error registering handlers: {e}")
+            from database.database import init_database
+            success = await init_database()
             
-            # Основні команди з адмін підтримкою
-            @self.dp.message(Command("start"))
-            async def cmd_start(message: Message):
+            if success:
+                logger.info("✅ Database initialized successfully")
+                
+                # Перевірка моделей дуелів
                 try:
-                    user_id = message.from_user.id
-                    is_admin = self.is_admin(user_id)
-                    
-                    # Реєстрація користувача в БД (якщо доступна)
-                    if self.db_available:
-                        from database.services import get_or_create_user
-                        user_data = get_or_create_user(
-                            user_id=user_id,
-                            username=message.from_user.username,
-                            first_name=message.from_user.first_name,
-                            last_name=message.from_user.last_name
-                        )
-                        
-                        if user_data:
-                            logger.info(f"User registered/updated: {user_id} (Admin: {is_admin})")
-                    
-                    # Підготовка тексту з адмін інформацією
-                    if self.settings:
-                        from config.settings import TEXTS
-                        text = TEXTS['start_message']
-                        if is_admin:
-                            text += f"\n\n🛡️ <b>АДМІН РЕЖИМ АКТИВНИЙ</b>\n📊 Доступні адмін команди"
-                    else:
-                        text = (
-                            f"🧠😂🔥 <b>Привіт! Я професійний україномовний бот!</b>\n\n"
-                            f"🎭 <b>Контент доступний:</b>\n"
-                            f"😂 /meme - випадкові меми\n"
-                            f"🤣 /joke - смішні жарти\n"
-                            f"🧠 /anekdot - українські анекдоти\n\n"
-                            f"📝 <b>Подавайте свій контент через кнопки!</b>\n\n"
-                            f"{'💾 База даних: підключена' if self.db_available else '⚠️ База даних: недоступна'}\n"
-                        )
-                        
-                        if is_admin:
-                            text += (
-                                f"\n🛡️ <b>АДМІН ФУНКЦІЇ:</b>\n"
-                                f"/admin_stats - статистика\n"
-                                f"/moderate - модерація\n"
-                                f"/pending - контент на розгляді\n"
-                                f"/approve_ID - швидке схвалення\n"
-                                f"/reject_ID - швидке відхилення"
-                            )
-                    
-                    # Створення клавіатури (різна для адміна та користувачів)
-                    if is_admin:
-                        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                            [
-                                InlineKeyboardButton(text="😂 Мем", callback_data="get_meme"),
-                                InlineKeyboardButton(text="🤣 Жарт", callback_data="get_joke"),
-                                InlineKeyboardButton(text="🧠 Анекдот", callback_data="get_anekdot")
-                            ],
-                            [
-                                InlineKeyboardButton(text="👤 Мій профіль", callback_data="profile"),
-                                InlineKeyboardButton(text="🏆 Топ користувачів", callback_data="top")
-                            ],
-                            [
-                                InlineKeyboardButton(text="📊 Адмін статистика", callback_data="admin_stats"),
-                                InlineKeyboardButton(text="🛡️ Модерація", callback_data="admin_moderate")
-                            ],
-                            [
-                                InlineKeyboardButton(text="📋 На розгляді", callback_data="admin_pending"),
-                                InlineKeyboardButton(text="👥 Адмін топ", callback_data="admin_top_users")
-                            ],
-                            [
-                                InlineKeyboardButton(text="📝 Подати мем", callback_data="submit_demo_meme"),
-                                InlineKeyboardButton(text="❓ Допомога", callback_data="help")
-                            ]
-                        ])
-                    else:
-                        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                            [
-                                InlineKeyboardButton(text="😂 Мем", callback_data="get_meme"),
-                                InlineKeyboardButton(text="🤣 Жарт", callback_data="get_joke"),
-                                InlineKeyboardButton(text="🧠 Анекдот", callback_data="get_anekdot")
-                            ],
-                            [
-                                InlineKeyboardButton(text="👤 Мій профіль", callback_data="profile"),
-                                InlineKeyboardButton(text="🏆 Топ користувачів", callback_data="top")
-                            ],
-                            [
-                                InlineKeyboardButton(text="📝 Подати мем", callback_data="submit_demo_meme"),
-                                InlineKeyboardButton(text="📝 Подати жарт", callback_data="submit_demo_joke")
-                            ],
-                            [
-                                InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
-                                InlineKeyboardButton(text="❓ Допомога", callback_data="help")
-                            ]
-                        ])
-                    
-                    await message.answer(text, reply_markup=keyboard)
-                    
-                except Exception as e:
-                    logger.error(f"Error in start handler: {e}")
-                    await message.answer("🧠😂🔥 <b>Бот працює!</b>\n\nВикористовуйте /status для перевірки стану.")
+                    from database.models import Duel, DuelVote
+                    logger.info("✅ Duel models loaded successfully")
+                except ImportError as e:
+                    logger.warning(f"⚠️ Duel models not available: {e}")
+                
+                self.db_available = True
+                return True
+            else:
+                logger.warning("⚠️ Database initialization failed")
+                return False
+                
+        except ImportError:
+            logger.warning("⚠️ Database module not available - working without DB")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Database initialization error: {e}")
+            return False
+
+    async def register_handlers(self):
+        """Реєстрація всіх хендлерів включно з дуелями"""
+        try:
+            logger.info("🔧 Реєстрація хендлерів з підтримкою дуелів...")
             
-            @self.dp.message(Command("status"))
-            async def cmd_status(message: Message):
-                uptime = datetime.now() - self.startup_time
-                is_admin = self.is_admin(message.from_user.id)
+            # Реєстрація через handlers/__init__.py
+            from handlers import register_handlers
+            self.handlers_status = register_handlers(self.dp)
+            
+            # Додаткові основні хендлери
+            await self.register_core_handlers()
+            
+            # Callback хендлер з підтримкою дуелів
+            await self.register_enhanced_callbacks()
+            
+            logger.info("✅ All handlers registered with duel support")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Handlers registration failed: {e}")
+            return False
+
+    async def register_core_handlers(self):
+        """Основні хендлери з меню дуелів"""
+        from aiogram import F
+        from aiogram.filters import Command
+        from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+        
+        @self.dp.message(Command("start"))
+        async def enhanced_start(message: Message):
+            """Розширена команда /start з меню дуелів"""
+            try:
+                user_id = message.from_user.id
+                is_admin = self.is_admin(user_id)
                 
-                status_text = f"✅ <b>Статус бота</b>\n\n"
-                status_text += f"⏱ Час роботи: {uptime}\n"
-                status_text += f"🗓 Запущено: {self.startup_time.strftime('%H:%M:%S %d.%m.%Y')}\n"
+                # Реєстрація користувача
+                if self.db_available:
+                    try:
+                        from database.services import get_or_create_user
+                        await get_or_create_user(
+                            user_id, 
+                            message.from_user.username, 
+                            message.from_user.full_name
+                        )
+                    except Exception as e:
+                        logger.error(f"Error creating user: {e}")
                 
-                if self.settings:
-                    status_text += f"⚙️ Конфігурація: повна\n"
-                    status_text += f"💾 База даних: {'✅ активна' if self.db_available else '❌ недоступна'}\n"
-                    status_text += f"🎭 Контент: меми, жарти, анекдоти\n"
-                    status_text += f"🛡️ Модерація: активна\n"
-                    status_text += f"🔧 Режим: професійний з модерацією\n"
-                else:
-                    status_text += f"⚙️ Конфігурація: базова\n"
-                    status_text += f"🔧 Режим: мінімальний\n"
+                # Текст привітання
+                text = "🧠😂🔥 <b>УКРАЇНОМОВНИЙ БОТ З ДУЕЛЯМИ!</b> 🧠😂🔥\n\n"
                 
                 if is_admin:
-                    status_text += f"\n👑 <b>Адмін статус: активний</b>"
+                    text += "👑 <b>Адмін режим активний</b>\n\n"
                 
-                await message.answer(status_text)
-            
-            # Інші основні команди залишаються без змін...
-            @self.dp.message(Command("profile"))
-            async def cmd_profile(message: Message):
-                if not self.db_available:
-                    await message.answer("❌ База даних недоступна")
-                    return
+                text += (
+                    "🎯 <b>Новинка: ДУЕЛІ ЖАРТІВ!</b> ⚔️\n"
+                    "Змагайтеся за звання найкращого коміка!\n\n"
+                    "📋 <b>Головні функції:</b>\n"
+                    "• ⚔️ Дуелі жартів з голосуванням\n"
+                    "• 😂 Меми та анекдоти\n"
+                    "• 🏆 Рейтингова система\n"
+                    "• 👤 Персональний профіль\n"
+                    "• 📊 Детальна статистика"
+                )
                 
-                try:
-                    from database.services import get_user_stats
-                    
-                    user_stats = get_user_stats(message.from_user.id)
-                    if user_stats:
-                        profile_text = f"👤 <b>Ваш профіль</b>\n\n"
-                        profile_text += f"🆔 ID: {user_stats['user_id']}\n"
-                        profile_text += f"⭐ Бали: {user_stats['points']}\n"
-                        profile_text += f"👑 Ранг: {user_stats['rank']}\n"
-                        profile_text += f"📅 Реєстрація: {user_stats['created_at'].strftime('%d.%m.%Y')}\n"
-                        profile_text += f"🕐 Остання активність: {user_stats['last_activity'].strftime('%d.%m.%Y %H:%M')}\n\n"
-                        profile_text += f"📊 <b>Статистика:</b>\n"
-                        profile_text += f"👀 Переглядів: {user_stats['total_views']}\n"
-                        profile_text += f"👍 Лайків: {user_stats['total_likes']}\n"
-                        profile_text += f"📝 Подань: {user_stats['total_submissions']}\n"
-                        profile_text += f"✅ Схвалень: {user_stats['total_approvals']}\n"
-                        profile_text += f"⚔️ Дуелей: {user_stats['total_duels']}"
-                        
-                        if self.is_admin(message.from_user.id):
-                            profile_text += f"\n\n👑 <b>Статус: Адміністратор</b>"
-                        
-                        await message.answer(profile_text)
-                    else:
-                        await message.answer("❌ Профіль не знайдено")
-                        
-                except Exception as e:
-                    logger.error(f"Profile error: {e}")
-                    await message.answer("❌ Помилка отримання профілю")
-            
-            @self.dp.message(Command("stats"))
-            async def cmd_stats(message: Message):
-                if not self.db_available:
-                    await message.answer("❌ База даних недоступна")
-                    return
+                # Створення клавіатури з дуелями
+                keyboard_rows = [
+                    [InlineKeyboardButton(text="⚔️ Дуелі жартів", callback_data="duel_menu")],
+                    [
+                        InlineKeyboardButton(text="😂 Мем", callback_data="get_meme"),
+                        InlineKeyboardButton(text="🤣 Жарт", callback_data="get_joke")
+                    ],
+                    [
+                        InlineKeyboardButton(text="👤 Профіль", callback_data="profile"),
+                        InlineKeyboardButton(text="📊 Статистика", callback_data="stats")
+                    ]
+                ]
                 
-                try:
-                    from database.services import get_basic_stats
-                    
-                    stats = get_basic_stats()
-                    stats_text = f"📊 <b>Статистика бота</b>\n\n"
-                    stats_text += f"👥 Користувачів: {stats['total_users']}\n"
-                    stats_text += f"📝 Контенту: {stats['total_content']}\n"
-                    stats_text += f"✅ Схвалено: {stats['approved_content']}\n"
-                    stats_text += f"⏳ На розгляді: {stats['pending_content']}\n"
-                    stats_text += f"⚔️ Дуелей: {stats['total_duels']}"
-                    
-                    # Додаткова інформація для адміна
-                    if self.is_admin(message.from_user.id):
-                        stats_text += f"\n\n🛡️ <b>Адмін команди:</b>\n/admin_stats - детальна статистика\n/moderate - почати модерацію"
-                    
-                    await message.answer(stats_text)
-                    
-                except Exception as e:
-                    logger.error(f"Stats error: {e}")
-                    await message.answer("❌ Помилка отримання статистики")
-            
-            @self.dp.message(Command("help"))
-            async def cmd_help(message: Message):
-                try:
-                    is_admin = self.is_admin(message.from_user.id)
-                    
-                    help_text = (
-                        "📖 <b>Довідка по командах</b>\n\n"
-                        "🎭 <b>Контент:</b>\n"
-                        "/meme - випадковий мем\n"
-                        "/joke - смішний жарт\n"
-                        "/anekdot - український анекдот\n\n"
-                        "👤 <b>Профіль:</b>\n"
-                        "/profile - ваш профіль\n"
-                        "/stats - статистика бота\n\n"
-                        "⚙️ <b>Система:</b>\n"
-                        "/start - перезапуск\n"
-                        "/status - статус бота\n"
-                        "/help - ця довідка\n\n"
-                        "📝 <b>Подача контенту через кнопки в меню!</b>"
-                    )
-                    
-                    if is_admin:
-                        help_text += (
-                            f"\n\n🛡️ <b>АДМІН КОМАНДИ:</b>\n"
-                            f"/admin_stats - детальна статистика\n"
-                            f"/moderate - почати модерацію\n"
-                            f"/pending - контент на розгляді\n"
-                            f"/approve_ID - швидке схвалення\n"
-                            f"/reject_ID [причина] - відхилення\n\n"
-                            f"💡 <b>Приклади:</b>\n"
-                            f"/approve_5 - схвалити контент ID 5\n"
-                            f"/reject_3 Неприйнятний контент"
+                # Адмін кнопки
+                if is_admin:
+                    keyboard_rows.append([
+                        InlineKeyboardButton(text="🛡️ Модерація", callback_data="admin_moderate"),
+                        InlineKeyboardButton(text="📈 Адмін стат", callback_data="admin_stats")
+                    ])
+                
+                keyboard_rows.append([
+                    InlineKeyboardButton(text="❓ Допомога", callback_data="help")
+                ])
+                
+                keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+                
+                await message.answer(text, reply_markup=keyboard)
+                
+                # Повідомлення адміну про запуск з дуелями
+                if is_admin:
+                    try:
+                        from config.settings import settings
+                        uptime = datetime.now() - self.startup_time
+                        admin_text = (
+                            f"✅ <b>Бот запущено в професійному режимі з дуелями!</b>\n\n"
+                            f"⚔️ <b>Система дуелів:</b> Активна\n"
+                            f"💾 <b>База даних:</b> {'Підключена' if self.db_available else 'Fallback'}\n"
+                            f"🔧 <b>Хендлери:</b> {self.handlers_status.get('total_registered', 0)}/4\n"
+                            f"⏰ <b>Uptime:</b> {uptime.total_seconds():.1f}с\n\n"
+                            f"🎯 <b>Нові функції:</b>\n"
+                            f"• /duel - система дуелів\n"
+                            f"• Голосування за жарти\n"
+                            f"• Рейтинги дуелістів\n"
+                            f"• Автоматичне завершення дуелів"
                         )
+                        
+                        await self.bot.send_message(settings.ADMIN_ID, admin_text)
+                    except Exception as e:
+                        logger.error(f"Error sending admin notification: {e}")
+                
+            except Exception as e:
+                logger.error(f"Error in start handler: {e}")
+                await message.answer("🤖 Бот запущено! Використовуйте /help для довідки.")
+
+        @self.dp.message(Command("help"))
+        async def enhanced_help(message: Message):
+            """Розширена довідка з дуелями"""
+            try:
+                text = (
+                    "📖 <b>ДОВІДКА - ПРОФЕСІЙНИЙ БОТ З ДУЕЛЯМИ</b>\n\n"
                     
-                    await message.answer(help_text)
-                except Exception as e:
-                    logger.error(f"Error in help handler: {e}")
-                    await message.answer("📖 <b>Довідка</b>\n\nБазові команди: /start, /status, /profile, /stats, /help")
-            
-            # Розширені callback handlers з адмін підтримкою
-            @self.dp.callback_query()
-            async def handle_main_callbacks(callback):
-                """Основні callback'и з адмін підтримкою"""
-                try:
-                    data = callback.data
-                    user_id = callback.from_user.id
-                    is_admin = self.is_admin(user_id)
+                    "⚔️ <b>ДУЕЛІ ЖАРТІВ (НОВИНКА!):</b>\n"
+                    "• /duel - головне меню дуелів\n"
+                    "• Голосуйте за найкращий жарт\n"
+                    "• Здобувайте рейтинг та ранги\n"
+                    "• Отримуйте бали за перемоги\n\n"
                     
-                    # Перевіряємо чи це не спеціалізований callback
-                    if any(data.startswith(prefix) for prefix in ["like_", "dislike_", "more_", "submit_", "admin_", "moderate_"]):
-                        return  # Нехай обробляють спеціалізовані хендлери
+                    "😂 <b>КОНТЕНТ:</b>\n"
+                    "• /meme - випадковий мем\n"
+                    "• /joke - смішний жарт\n"
+                    "• /anekdot - український анекдот\n"
+                    "• Лайкайте та діліться\n\n"
                     
-                    if data == "get_meme":
+                    "👤 <b>ПРОФІЛЬ:</b>\n"
+                    "• /profile - ваша статистика\n"
+                    "• Система балів та рангів\n"
+                    "• Історія дуелей\n"
+                    "• Досягнення\n\n"
+                    
+                    "🎮 <b>СИСТЕМА БАЛІВ:</b>\n"
+                    "• +2 бали за голосування в дуелі\n"
+                    "• +10 балів за участь у дуелі\n"
+                    "• +25 балів за перемогу\n"
+                    "• +50 балів за розгромну перемогу\n\n"
+                    
+                    "🏆 <b>РАНГИ ДУЕЛІСТІВ:</b>\n"
+                    "• 🥉 Стажер (0-999)\n"
+                    "• 🎯 Новачок (1000-1199)\n"
+                    "• 🔥 Досвідчений (1200-1399)\n"
+                    "• ⚡ Професіонал (1400-1599)\n"
+                    "• ⭐ Експерт (1600-1799)\n"
+                    "• 🏆 Майстер (1800-1999)\n"
+                    "• 👑 Гранд-майстер (2000+)"
+                )
+                
+                # Адмін команди
+                if self.is_admin(message.from_user.id):
+                    text += (
+                        "\n\n🛡️ <b>АДМІН КОМАНДИ:</b>\n"
+                        "• /admin_stats - детальна статистика\n"
+                        "• /moderate - модерація контенту\n"
+                        "• /pending - контент на розгляді\n"
+                        "• /approve_ID - схвалити\n"
+                        "• /reject_ID причина - відхилити"
+                    )
+                
+                await message.answer(text)
+                
+            except Exception as e:
+                logger.error(f"Error in help handler: {e}")
+                await message.answer("📖 <b>Довідка</b>\n\nБазові команди: /start, /duel, /profile, /help")
+
+    async def register_enhanced_callbacks(self):
+        """Розширені callback хендлери з підтримкою дуелів"""
+        
+        @self.dp.callback_query()
+        async def handle_enhanced_callbacks(callback):
+            """Головний callback хендлер з підтримкою дуелів"""
+            try:
+                data = callback.data
+                user_id = callback.from_user.id
+                is_admin = self.is_admin(user_id)
+                
+                # Перевіряємо спеціалізовані callback'и
+                if any(data.startswith(prefix) for prefix in [
+                    "like_", "dislike_", "more_", "submit_",  # content
+                    "admin_", "moderate_",                    # admin
+                    "vote_", "duel_", "create_duel", "view_duels"  # duels
+                ]):
+                    return  # Нехай спеціалізовані хендлери обробляють
+                
+                # Основні callback'и
+                if data == "duel_menu":
+                    # Переходимо до меню дуелів
+                    try:
+                        from handlers.duel_handlers import cmd_duel
+                        await cmd_duel(callback.message)
+                        await callback.answer("⚔️ Дуелі жартів!")
+                    except ImportError:
+                        await callback.message.edit_text(
+                            "⚔️ <b>ДУЕЛІ ЖАРТІВ</b>\n\n"
+                            "Система дуелів тимчасово недоступна.\n"
+                            "Спробуйте пізніше або використайте /duel"
+                        )
+                        await callback.answer("Завантаження...")
+                        
+                elif data == "get_meme":
+                    try:
                         from handlers.content_handlers import handle_meme_command
                         await handle_meme_command(callback.message)
+                        await callback.answer("😂 Мем завантажено!")
+                    except ImportError:
+                        await callback.message.answer("😂 <i>Коли твій код працює з першого разу...\nЗначить щось пішло не так! 🤔</i>")
                         await callback.answer()
                         
-                    elif data == "get_joke":
+                elif data == "get_joke":
+                    try:
                         from handlers.content_handlers import handle_joke_command
                         await handle_joke_command(callback.message)
+                        await callback.answer("🤣 Жарт завантажено!")
+                    except ImportError:
+                        await callback.message.answer("🤣 <i>Програміст заходить у бар...\nБармен каже: 'Як завжди?' Програміст: 'Ні, цього разу я просто випити прийшов!'</i>")
                         await callback.answer()
-                        
-                    elif data == "get_anekdot":
-                        from handlers.content_handlers import handle_anekdot_command
-                        await handle_anekdot_command(callback.message)
-                        await callback.answer()
-                    
-                    elif data == "profile":
-                        if self.db_available:
-                            from database.services import get_user_stats
-                            user_stats = get_user_stats(user_id)
-                            if user_stats:
-                                profile_msg = f"👤 <b>Ваш профіль:</b>\n⭐ Бали: {user_stats['points']}\n👑 Ранг: {user_stats['rank']}"
-                                if is_admin:
-                                    profile_msg += f"\n👑 Статус: Адміністратор"
-                                await callback.message.answer(profile_msg)
+                
+                elif data == "profile":
+                    if self.db_available:
+                        try:
+                            from database.services import get_user_by_id, get_user_duel_stats
+                            
+                            user = await get_user_by_id(user_id)
+                            duel_stats = await get_user_duel_stats(user_id)
+                            
+                            if user:
+                                # Визначаємо ранг
+                                points = user.get('total_points', 0)
+                                if points >= 5000:
+                                    rank = "🚀 Гумористичний Геній"
+                                elif points >= 3000:
+                                    rank = "🌟 Легенда Мемів"
+                                elif points >= 1500:
+                                    rank = "🏆 Король Гумору"
+                                elif points >= 750:
+                                    rank = "👑 Мастер Рофлу"
+                                elif points >= 350:
+                                    rank = "🎭 Комік"
+                                elif points >= 150:
+                                    rank = "😂 Гуморист"
+                                elif points >= 50:
+                                    rank = "😄 Сміхун"
+                                else:
+                                    rank = "🤡 Новачок"
+                                
+                                text = f"👤 <b>ПРОФІЛЬ КОРИСТУВАЧА</b>\n\n"
+                                text += f"🏷️ Ім'я: {user.get('full_name', 'Невідомо')}\n"
+                                text += f"👑 Ранг: {rank}\n"
+                                text += f"💰 Бали: {points}\n"
+                                text += f"📅 Реєстрація: {user.get('created_at', 'Невідомо')}\n\n"
+                                
+                                # Статистика дуелів
+                                if duel_stats:
+                                    wins = duel_stats.get('wins', 0)
+                                    total = duel_stats.get('total_duels', 0)
+                                    win_rate = (wins / total * 100) if total > 0 else 0
+                                    duel_rating = duel_stats.get('rating', 1000)
+                                    
+                                    text += f"⚔️ <b>СТАТИСТИКА ДУЕЛІВ:</b>\n"
+                                    text += f"🏆 Перемоги: {wins}/{total} ({win_rate:.1f}%)\n"
+                                    text += f"⭐ Рейтинг: {duel_rating}\n"
+                                    
+                                    # Ранг дуеліста
+                                    if duel_rating >= 2000:
+                                        duel_rank = "👑 Гранд-майстер"
+                                    elif duel_rating >= 1800:
+                                        duel_rank = "🏆 Майстер"
+                                    elif duel_rating >= 1600:
+                                        duel_rank = "⭐ Експерт"
+                                    elif duel_rating >= 1400:
+                                        duel_rank = "⚡ Професіонал"
+                                    elif duel_rating >= 1200:
+                                        duel_rank = "🔥 Досвідчений"
+                                    elif duel_rating >= 1000:
+                                        duel_rank = "🎯 Новачок"
+                                    else:
+                                        duel_rank = "🥉 Стажер"
+                                    
+                                    text += f"🎯 Ранг дуеліста: {duel_rank}\n"
+                                    
+                                    if duel_stats.get('best_win_streak', 0) > 0:
+                                        text += f"🔥 Найкраща серія: {duel_stats['best_win_streak']}\n"
+                                else:
+                                    text += "⚔️ <b>Ще не брали участь у дуелях</b>\n"
+                                    text += "Використайте /duel щоб почати!"
+                                
+                                await callback.message.edit_text(text)
                             else:
-                                await callback.message.answer("❌ Профіль не знайдено")
-                        else:
-                            await callback.message.answer("❌ База даних недоступна")
-                        await callback.answer()
-                        
-                    elif data == "stats":
+                                await callback.message.edit_text("❌ Профіль не знайдено")
+                        except Exception as e:
+                            logger.error(f"Error in profile callback: {e}")
+                            await callback.message.edit_text("❌ Помилка завантаження профілю")
+                    else:
+                        await callback.message.edit_text(
+                            "👤 <b>Ваш профіль</b>\n\n"
+                            "🎮 Ранг: Новачок\n"
+                            "💰 Бали: 0\n"
+                            "⚔️ Дуелі: 0/0\n\n"
+                            "📊 База даних недоступна"
+                        )
+                    
+                    await callback.answer()
+                    
+                elif data == "stats":
+                    try:
                         if self.db_available:
                             from database.services import get_basic_stats
                             stats = get_basic_stats()
-                            stats_msg = f"📊 <b>Статистика:</b>\n👥 Користувачів: {stats['total_users']}\n📝 Контенту: {stats['total_content']}"
-                            if is_admin:
-                                stats_msg += f"\n⏳ На модерації: {stats['pending_content']}"
-                            await callback.message.answer(stats_msg)
+                            
+                            text = f"📊 <b>СТАТИСТИКА БОТА</b>\n\n"
+                            text += f"👥 Користувачів: {stats.get('total_users', '?')}\n"
+                            text += f"😂 Контенту: {stats.get('total_content', '?')}\n"
+                            text += f"✅ Схвалено: {stats.get('approved_content', '?')}\n"
+                            text += f"⚔️ Дуелей: {stats.get('total_duels', '?')}\n"
+                            text += f"🗳️ Голосів: {stats.get('total_votes', '?')}\n"
+                            text += f"🏆 Активних дуелей: {stats.get('active_duels', '?')}\n\n"
+                            text += f"📈 <b>Система дуелей працює!</b>"
                         else:
-                            await callback.message.answer("❌ База даних недоступна")
+                            text = (
+                                "📊 <b>СТАТИСТИКА БОТА</b>\n\n"
+                                "🤖 Статус: Онлайн\n"
+                                "⚔️ Дуелі: Активні\n"
+                                "💾 БД: Fallback режим\n"
+                                "🔧 Версія: Professional з дуелями"
+                            )
+                        
+                        await callback.message.edit_text(text)
+                    except Exception as e:
+                        logger.error(f"Error in stats callback: {e}")
+                        await callback.message.edit_text("📊 Статистика тимчасово недоступна")
+                    
+                    await callback.answer()
+                    
+                elif data == "help":
+                    await self.enhanced_help(callback.message)
+                    await callback.answer()
+                    
+                # Адмін callback'и
+                elif data == "admin_moderate" and is_admin:
+                    try:
+                        from handlers.admin_handlers import cmd_moderate
+                        await cmd_moderate(callback.message)
+                        await callback.answer("🛡️ Модерація")
+                    except ImportError:
+                        await callback.message.edit_text("🛡️ Модерація тимчасово недоступна")
                         await callback.answer()
                         
-                    elif data == "top":
-                        if self.db_available:
-                            from database.services import get_top_users
-                            top_users = get_top_users(5)
-                            if top_users:
-                                top_text = "🏆 <b>Топ користувачів:</b>\n\n"
-                                for i, user in enumerate(top_users, 1):
-                                    name = user['first_name'] or user['username'] or f"User{user['user_id']}"
-                                    top_text += f"{i}. {name} - {user['points']} балів\n"
-                                await callback.message.answer(top_text)
-                            else:
-                                await callback.message.answer("👥 Поки що немає користувачів в рейтингу")
-                        else:
-                            await callback.message.answer("❌ База даних недоступна")
+                elif data == "admin_stats" and is_admin:
+                    try:
+                        from handlers.admin_handlers import cmd_admin_stats
+                        await cmd_admin_stats(callback.message)
+                        await callback.answer("📈 Адмін статистика")
+                    except ImportError:
+                        await callback.message.edit_text("📈 Адмін статистика недоступна")
                         await callback.answer()
-                        
-                    elif data == "help":
-                        help_msg = (
-                            "📖 <b>Допомога</b>\n\n"
-                            "🎭 Використовуйте кнопки для отримання контенту!\n"
-                            "📝 Подавайте свій контент через відповідні кнопки\n"
-                            "⭐ Заробляйте бали за активність\n"
-                            "🏆 Змагайтеся в рейтингу!"
-                        )
-                        if is_admin:
-                            help_msg += f"\n\n🛡️ Ви маєте адмін права!\nВикористовуйте адмін кнопки для модерації."
-                        await callback.message.answer(help_msg)
-                        await callback.answer()
-                    else:
-                        await callback.answer("🚧 Функція в розробці!")
-                        
-                except Exception as e:
-                    logger.error(f"Main callback error: {e}")
-                    await callback.answer("❌ Помилка обробки!")
+                
+                else:
+                    await callback.answer("🔄 Функція завантажується...")
+                    
+            except Exception as e:
+                logger.error(f"Error in callback handler: {e}")
+                await callback.answer("❌ Помилка обробки")
+
+    async def setup_scheduler(self):
+        """Налаштування планувальника для автоматичного завершення дуелів"""
+        try:
+            logger.info("⏰ Налаштування планувальника дуелів...")
             
-            logger.info("✅ Enhanced handlers with admin integration registered")
-            return True
+            from apscheduler.schedulers.asyncio import AsyncIOScheduler
+            from apscheduler.triggers.interval import IntervalTrigger
             
+            scheduler = AsyncIOScheduler()
+            
+            # Автоматичне завершення прострочених дуелів кожну хвилину
+            if self.db_available:
+                try:
+                    from database.services import auto_finish_expired_duels, cleanup_old_duels
+                    
+                    scheduler.add_job(
+                        auto_finish_expired_duels,
+                        IntervalTrigger(minutes=1),
+                        id='auto_finish_duels',
+                        name='Auto finish expired duels'
+                    )
+                    
+                    # Очистка старих дуелей щодня о 03:00
+                    scheduler.add_job(
+                        cleanup_old_duels,
+                        'cron',
+                        hour=3,
+                        minute=0,
+                        id='cleanup_old_duels',
+                        name='Cleanup old duels'
+                    )
+                    
+                    logger.info("✅ Duel scheduler configured")
+                except ImportError:
+                    logger.warning("⚠️ Duel services not available for scheduler")
+            
+            scheduler.start()
+            logger.info("✅ Scheduler started successfully")
+            return scheduler
+            
+        except ImportError:
+            logger.warning("⚠️ APScheduler not available")
+            return None
         except Exception as e:
-            logger.error(f"❌ Handlers setup error: {e}")
-            return False
-    
+            logger.error(f"❌ Scheduler setup failed: {e}")
+            return None
+
     async def main(self):
-        logger.info("🚀 Starting Enhanced Ukrainian Telegram Bot with Admin System...")
+        """Головна функція запуску бота з дуелями"""
+        logger.info("🚀 Starting Enhanced Ukrainian Telegram Bot with Duels...")
         
         try:
-            # Load settings
-            settings = self.load_settings()
-            
-            if not self.validate_settings(settings):
+            # Ініціалізація компонентів
+            if not await self.initialize_bot():
                 return False
             
-            # Initialize database
-            await self.init_database(settings['database_url'])
+            if not await self.initialize_database():
+                logger.warning("⚠️ Working without full database support")
             
-            # Create bot
-            if not await self.create_bot(settings):
+            if not await self.register_handlers():
                 return False
             
-            # Setup handlers
-            if not await self.setup_handlers():
-                return False
+            # Планувальник
+            scheduler = await self.setup_scheduler()
             
-            # Notify admin
-            if settings.get('admin_id') and self.bot:
-                try:
-                    mode = "професійному з модерацією" if self.settings else "базовому"
-                    db_status = "підключена" if self.db_available else "недоступна"
-                    
-                    await self.bot.send_message(
-                        settings['admin_id'],
-                        f"✅ <b>Бот запущено в {mode} режимі!</b>\n\n"
-                        f"🕐 Час: {datetime.now().strftime('%H:%M:%S')}\n"
-                        f"⚙️ Налаштування: {'повні' if self.settings else 'базові'}\n"
-                        f"💾 База даних: {db_status}\n\n"
-                        f"🎭 <b>Контент система:</b>\n"
-                        f"😂 Меми (/meme)\n"
-                        f"🤣 Жарти (/joke)\n"
-                        f"🧠 Анекдоти (/anekdot)\n"
-                        f"📝 Подача контенту через кнопки\n\n"
-                        f"🛡️ <b>Адмін функції:</b>\n"
-                        f"/admin_stats - детальна статистика\n"
-                        f"/moderate - модерація контенту\n"
-                        f"/pending - контент на розгляді\n"
-                        f"/approve_ID - швидке схвалення\n"
-                        f"/reject_ID - швидке відхилення\n\n"
-                        f"⭐ Система балів та модерація активні!"
-                    )
-                except Exception as e:
-                    logger.warning(f"Could not notify admin: {e}")
+            # Налаштування graceful shutdown
+            def signal_handler():
+                logger.info("📶 Shutdown signal received")
+                self.shutdown_event.set()
             
-            logger.info("🎯 Starting polling with admin system...")
-            await self.dp.start_polling(self.bot, skip_updates=True)
+            signal.signal(signal.SIGINT, lambda s, f: signal_handler())
+            signal.signal(signal.SIGTERM, lambda s, f: signal_handler())
+            
+            logger.info("✅ Bot fully initialized with duel system")
+            
+            # Запуск polling з graceful shutdown
+            try:
+                polling_task = asyncio.create_task(self.dp.start_polling(self.bot))
+                shutdown_task = asyncio.create_task(self.shutdown_event.wait())
+                
+                logger.info("🎯 Bot started - Duels are active!")
+                
+                # Чекаємо або polling або shutdown
+                done, pending = await asyncio.wait(
+                    [polling_task, shutdown_task],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+                
+                # Скасовуємо pending завдання
+                for task in pending:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                
+            finally:
+                # Graceful shutdown
+                if scheduler:
+                    scheduler.shutdown()
+                    logger.info("✅ Scheduler stopped")
+                
+                await self.bot.session.close()
+                logger.info("✅ Bot session closed")
             
             return True
             
         except Exception as e:
-            logger.error(f"💥 Critical error: {e}")
+            logger.error(f"❌ Critical error in main: {e}")
             return False
-        finally:
-            if self.bot:
-                await self.bot.session.close()
+
+# ===== ЗАПУСК =====
 
 async def main():
-    bot = UkrainianTelegramBot()
-    try:
-        result = await bot.main()
-        return result
-    except KeyboardInterrupt:
-        logger.info("🛑 Stopped by user")
-        return True
-    except Exception as e:
-        logger.error(f"💥 Unexpected error: {e}")
-        return False
+    """Точка входу"""
+    bot = UkrainianTelegramBotWithDuels()
+    success = await bot.main()
+    return success
 
 if __name__ == "__main__":
     try:
-        result = asyncio.run(main())
-        sys.exit(0 if result else 1)
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("👋 Bot stopped by user")
     except Exception as e:
         logger.error(f"💥 Fatal error: {e}")
         sys.exit(1)

@@ -1,456 +1,536 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# ===== ДУЕЛІ ТА ГОЛОСУВАННЯ =====
 
-import logging
-from datetime import datetime
-from typing import Optional, List, Dict, Any
-from contextlib import contextmanager
-
-from sqlalchemy import create_engine, func
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.exc import SQLAlchemyError
-
-logger = logging.getLogger(__name__)
-
-# Global database objects
-engine = None
-SessionLocal = None
-
-def init_database(database_url: str) -> bool:
-    """Ініціалізація бази даних"""
-    global engine, SessionLocal
-    
+async def create_duel(content1_id: int, content2_id: int, ends_at, min_votes: int = 3) -> Optional[Dict[str, Any]]:
+    """Створення нової дуелі"""
     try:
-        from .models import Base
+        from .models import Duel, DuelStatus
         
-        # Створення engine
-        if database_url.startswith('sqlite'):
-            engine = create_engine(database_url, echo=False)
-        else:
-            engine = create_engine(
-                database_url, 
-                echo=False, 
-                pool_pre_ping=True,
-                pool_recycle=3600
+        with get_db_session() as session:
+            # Створюємо нову дуель
+            duel = Duel(
+                content1_id=content1_id,
+                content2_id=content2_id,
+                status=DuelStatus.ACTIVE,
+                ends_at=ends_at,
+                min_votes=min_votes,
+                content1_votes=0,
+                content2_votes=0,
+                total_votes=0
             )
-        
-        # Створення session factory
-        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        
-        # Створення таблиць
-        Base.metadata.create_all(engine)
-        
-        logger.info("✅ Database initialized successfully")
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Database initialization error: {e}")
-        return False
-
-@contextmanager
-def get_db_session():
-    """Контекстний менеджер для сесії БД"""
-    if not SessionLocal:
-        raise RuntimeError("Database not initialized")
-    
-    session = SessionLocal()
-    try:
-        yield session
-        session.commit()
-    except Exception as e:
-        session.rollback()
-        logger.error(f"Database session error: {e}")
-        raise
-    finally:
-        session.close()
-
-# ===== КОРИСТУВАЧІ =====
-
-def get_or_create_user(user_id: int, username: str = None, first_name: str = None, last_name: str = None) -> Optional[Dict]:
-    """Отримання або створення користувача"""
-    try:
-        from .models import User
-        
-        with get_db_session() as session:
-            # Пошук існуючого користувача
-            user = session.query(User).filter(User.user_id == user_id).first()
             
-            if user:
-                # Оновлення інформації
-                if username and user.username != username:
-                    user.username = username
-                if first_name and user.first_name != first_name:
-                    user.first_name = first_name
-                if last_name and user.last_name != last_name:
-                    user.last_name = last_name
-                
-                user.last_activity = datetime.now()
-                user.updated_at = datetime.now()
-                
-            else:
-                # Створення нового користувача
-                user = User(
-                    user_id=user_id,
-                    username=username,
-                    first_name=first_name,
-                    last_name=last_name,
-                    created_at=datetime.now(),
-                    last_activity=datetime.now()
-                )
-                session.add(user)
-            
+            session.add(duel)
             session.commit()
+            session.refresh(duel)
             
-            return {
-                'id': user.id,
-                'user_id': user.user_id,
-                'username': user.username,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'points': user.points,
-                'rank': user.rank,
-                'created_at': user.created_at
-            }
+            logger.info(f"Created duel {duel.id} between content {content1_id} and {content2_id}")
+            
+            # Повертаємо дуель з повною інформацією
+            return await get_duel_by_id(duel.id)
             
     except Exception as e:
-        logger.error(f"Error in get_or_create_user: {e}")
+        logger.error(f"Error creating duel: {e}")
         return None
 
-def update_user_points(user_id: int, points_change: int, reason: str = "") -> bool:
-    """Оновлення балів користувача"""
+async def get_duel_by_id(duel_id: int) -> Optional[Dict[str, Any]]:
+    """Отримання дуелі за ID з повною інформацією"""
     try:
-        from .models import User
+        from .models import Duel, Content, User, DuelStatus
         
         with get_db_session() as session:
-            user = session.query(User).filter(User.user_id == user_id).first()
+            # Отримуємо дуель з join'ами на контент
+            result = session.query(
+                Duel,
+                Content.text.label('content1_text'),
+                Content.content_type.label('content1_type'),
+                Content.author_id.label('content1_author'),
+            ).join(
+                Content, Duel.content1_id == Content.id
+            ).filter(Duel.id == duel_id).first()
             
-            if user:
-                old_points = user.points
-                user.points = max(0, user.points + points_change)
-                user.updated_at = datetime.now()
+            if not result:
+                return None
                 
-                session.commit()
-                
-                logger.info(f"User {user_id} points: {old_points} -> {user.points} ({reason})")
-                return True
-            else:
-                logger.warning(f"User {user_id} not found for points update")
-                return False
-                
-    except Exception as e:
-        logger.error(f"Error updating user points: {e}")
-        return False
-
-def get_user_stats(user_id: int) -> Optional[Dict]:
-    """Отримання статистики користувача"""
-    try:
-        from .models import User
-        
-        with get_db_session() as session:
-            user = session.query(User).filter(User.user_id == user_id).first()
+            duel = result.Duel
             
-            if user:
-                return {
-                    'user_id': user.user_id,
-                    'points': user.points,
-                    'rank': user.rank,
-                    'total_views': user.total_views,
-                    'total_likes': user.total_likes,
-                    'total_submissions': user.total_submissions,
-                    'total_approvals': user.total_approvals,
-                    'total_duels': user.total_duels,
-                    'created_at': user.created_at,
-                    'last_activity': user.last_activity
-                }
-            return None
+            # Отримуємо другий контент окремо
+            content2 = session.query(Content).filter(Content.id == duel.content2_id).first()
             
-    except Exception as e:
-        logger.error(f"Error getting user stats: {e}")
-        return None
-
-def get_top_users(limit: int = 10) -> List[Dict]:
-    """Отримання топ користувачів по балах"""
-    try:
-        from .models import User
-        
-        with get_db_session() as session:
-            users = session.query(User)\
-                          .filter(User.is_active == True)\
-                          .order_by(User.points.desc())\
-                          .limit(limit)\
-                          .all()
-            
-            return [
-                {
-                    'user_id': user.user_id,
-                    'first_name': user.first_name,
-                    'username': user.username,
-                    'points': user.points,
-                    'rank': user.rank
-                }
-                for user in users
-            ]
-            
-    except Exception as e:
-        logger.error(f"Error getting top users: {e}")
-        return []
-
-# ===== КОНТЕНТ =====
-
-def add_content(author_user_id: int, content_type: str, text: str, media_url: str = None) -> Optional[int]:
-    """Додавання нового контенту"""
-    try:
-        from .models import Content, User
-        
-        with get_db_session() as session:
-            # Знаходимо автора
-            user = session.query(User).filter(User.user_id == author_user_id).first()
-            if not user:
-                logger.warning(f"User {author_user_id} not found for content creation")
+            if not content2:
                 return None
             
-            # Створюємо контент
-            content = Content(
-                content_type=content_type,
-                text=text,
-                media_url=media_url,
-                author_id=user.id,
-                author_user_id=author_user_id,
-                created_at=datetime.now()
-            )
-            
-            session.add(content)
-            session.commit()
-            
-            # Оновлюємо статистику користувача
-            user.total_submissions += 1
-            session.commit()
-            
-            logger.info(f"Content {content.id} created by user {author_user_id}")
-            return content.id
-            
-    except Exception as e:
-        logger.error(f"Error adding content: {e}")
-        return None
-
-def get_random_approved_content(content_type: str = None) -> Optional[Dict]:
-    """Отримання випадкового схваленого контенту"""
-    try:
-        from .models import Content, ContentStatus
-        
-        with get_db_session() as session:
-            query = session.query(Content)\
-                          .filter(Content.status == ContentStatus.APPROVED.value)
-            
-            if content_type:
-                query = query.filter(Content.content_type == content_type)
-            
-            content = query.order_by(func.random()).first()
-            
-            if content:
-                # Збільшуємо лічильник переглядів
-                content.views += 1
-                session.commit()
+            # Формуємо результат
+            duel_data = {
+                'id': duel.id,
+                'status': duel.status,
+                'content1_id': duel.content1_id,
+                'content2_id': duel.content2_id,
+                'content1_votes': duel.content1_votes,
+                'content2_votes': duel.content2_votes,
+                'total_votes': duel.total_votes,
+                'min_votes': duel.min_votes,
+                'ends_at': duel.ends_at,
+                'created_at': duel.created_at,
+                'finished_at': duel.finished_at,
+                'winner_content_id': duel.winner_content_id,
                 
-                return {
-                    'id': content.id,
-                    'type': content.content_type,
-                    'text': content.text,
-                    'media_url': content.media_url,
-                    'views': content.views,
-                    'likes': content.likes,
-                    'author_user_id': content.author_user_id
+                # Інформація про контент
+                'content1': {
+                    'id': duel.content1_id,
+                    'text': result.content1_text,
+                    'type': result.content1_type,
+                    'author_id': result.content1_author
+                },
+                'content2': {
+                    'id': content2.id,
+                    'text': content2.text,
+                    'type': content2.content_type,
+                    'author_id': content2.author_id
                 }
-            return None
+            }
+            
+            return duel_data
             
     except Exception as e:
-        logger.error(f"Error getting random content: {e}")
+        logger.error(f"Error getting duel {duel_id}: {e}")
         return None
 
-# ===== СТАТИСТИКА ТА АНАЛІТИКА =====
-
-def get_basic_stats() -> Dict[str, int]:
-    """Отримання базової статистики бота"""
+async def get_active_duels(limit: int = 10) -> List[Dict[str, Any]]:
+    """Отримання списку активних дуелів"""
     try:
-        from .models import User, Content, Duel, ContentStatus
+        from .models import Duel, DuelStatus
         
         with get_db_session() as session:
-            total_users = session.query(User).filter(User.is_active == True).count()
-            total_content = session.query(Content).count()
-            approved_content = session.query(Content).filter(Content.status == ContentStatus.APPROVED.value).count()
-            pending_content = session.query(Content).filter(Content.status == ContentStatus.PENDING.value).count()
-            rejected_content = session.query(Content).filter(Content.status == ContentStatus.REJECTED.value).count()
-            total_duels = session.query(Duel).count()
-            
-            return {
-                'total_users': total_users,
-                'total_content': total_content,
-                'approved_content': approved_content,
-                'pending_content': pending_content,
-                'rejected_content': rejected_content,
-                'total_duels': total_duels
-            }
-            
-    except Exception as e:
-        logger.error(f"Error getting basic stats: {e}")
-        return {
-            'total_users': 0,
-            'total_content': 0,
-            'approved_content': 0,
-            'pending_content': 0,
-            'rejected_content': 0,
-            'total_duels': 0
-        }
-
-def get_detailed_admin_stats() -> Dict[str, Any]:
-    """Отримання детальної статистики для адміна"""
-    try:
-        from .models import User, Content, ContentStatus, AdminAction
-        from datetime import datetime, timedelta
-        
-        with get_db_session() as session:
-            # Загальна статистика
-            total_users = session.query(User).filter(User.is_active == True).count()
-            
-            # Активність за останній день
-            yesterday = datetime.now() - timedelta(days=1)
-            active_today = session.query(User).filter(
-                User.last_activity >= yesterday,
-                User.is_active == True
-            ).count()
-            
-            # Нові користувачі за тиждень
-            week_ago = datetime.now() - timedelta(days=7)
-            new_users_week = session.query(User).filter(
-                User.created_at >= week_ago,
-                User.is_active == True
-            ).count()
-            
-            # Статистика контенту
-            total_content = session.query(Content).count()
-            approved_content = session.query(Content).filter(Content.status == ContentStatus.APPROVED.value).count()
-            pending_content = session.query(Content).filter(Content.status == ContentStatus.PENDING.value).count()
-            rejected_content = session.query(Content).filter(Content.status == ContentStatus.REJECTED.value).count()
-            
-            # Контент за тиждень
-            new_content_week = session.query(Content).filter(Content.created_at >= week_ago).count()
-            
-            # Топ користувачі по балах
-            top_users = session.query(User).filter(User.is_active == True).order_by(User.points.desc()).limit(5).all()
-            
-            # Активність адміна
-            admin_actions_week = session.query(AdminAction).filter(AdminAction.created_at >= week_ago).count()
-            
-            return {
-                'total_users': total_users,
-                'active_today': active_today,
-                'new_users_week': new_users_week,
-                'total_content': total_content,
-                'approved_content': approved_content,
-                'pending_content': pending_content,
-                'rejected_content': rejected_content,
-                'new_content_week': new_content_week,
-                'admin_actions_week': admin_actions_week,
-                'top_users': [
-                    {
-                        'user_id': user.user_id,
-                        'first_name': user.first_name,
-                        'username': user.username,
-                        'points': user.points,
-                        'rank': user.rank
-                    }
-                    for user in top_users
-                ],
-                'approval_rate': round((approved_content / max(total_content, 1)) * 100, 1) if total_content > 0 else 0
-            }
-            
-    except Exception as e:
-        logger.error(f"Error getting detailed admin stats: {e}")
-        return get_basic_stats()  # Fallback до базової статистики
-
-def get_pending_content_list(limit: int = 10) -> List[Dict]:
-    """Отримання списку контенту на модерації"""
-    try:
-        from .models import Content, ContentStatus, User
-        
-        with get_db_session() as session:
-            pending_content = session.query(Content)\
-                                   .filter(Content.status == ContentStatus.PENDING.value)\
-                                   .order_by(Content.created_at.asc())\
-                                   .limit(limit)\
-                                   .all()
+            duels = session.query(Duel).filter(
+                Duel.status == DuelStatus.ACTIVE
+            ).order_by(Duel.created_at.desc()).limit(limit).all()
             
             result = []
-            for content in pending_content:
-                # Отримуємо автора
-                author = session.query(User).filter(User.id == content.author_id).first()
-                author_name = "Невідомий"
-                if author:
-                    author_name = author.first_name or author.username or f"User{author.user_id}"
-                
+            for duel in duels:
                 result.append({
-                    'id': content.id,
-                    'type': content.content_type,
-                    'text': content.text,
-                    'author_name': author_name,
-                    'author_user_id': content.author_user_id,
-                    'created_at': content.created_at
+                    'id': duel.id,
+                    'status': duel.status,
+                    'content1_votes': duel.content1_votes,
+                    'content2_votes': duel.content2_votes,
+                    'total_votes': duel.total_votes,
+                    'ends_at': duel.ends_at,
+                    'created_at': duel.created_at,
+                    'min_votes': duel.min_votes
                 })
             
             return result
             
     except Exception as e:
-        logger.error(f"Error getting pending content list: {e}")
+        logger.error(f"Error getting active duels: {e}")
         return []
 
-def get_content_by_id(content_id: int) -> Optional[Dict]:
-    """Отримання контенту по ID"""
+async def vote_in_duel(duel_id: int, user_id: int, vote_for: str) -> Dict[str, Any]:
+    """Голосування в дуелі
+    
+    Args:
+        duel_id: ID дуелі
+        user_id: ID користувача
+        vote_for: 'content1' або 'content2'
+    
+    Returns:
+        Dict з результатом: {'success': bool, 'error': str, 'votes': dict}
+    """
     try:
-        from .models import Content, User
+        from .models import Duel, DuelVote, DuelStatus
         
         with get_db_session() as session:
-            content = session.query(Content).filter(Content.id == content_id).first()
+            # Перевіряємо дуель
+            duel = session.query(Duel).filter(Duel.id == duel_id).first()
             
-            if not content:
-                return None
+            if not duel:
+                return {'success': False, 'error': 'Дуель не знайдена'}
             
-            # Отримуємо автора
-            author = session.query(User).filter(User.id == content.author_id).first()
-            author_name = "Невідомий"
-            if author:
-                author_name = author.first_name or author.username or f"User{author.user_id}"
+            if duel.status != DuelStatus.ACTIVE:
+                return {'success': False, 'error': 'duel_finished'}
+            
+            # Перевіряємо чи користувач вже голосував
+            existing_vote = session.query(DuelVote).filter(
+                DuelVote.duel_id == duel_id,
+                DuelVote.user_id == user_id
+            ).first()
+            
+            if existing_vote:
+                return {'success': False, 'error': 'already_voted'}
+            
+            # Валідуємо vote_for
+            if vote_for not in ['content1', 'content2']:
+                return {'success': False, 'error': 'Некоректний вибір'}
+            
+            # Створюємо голос
+            content_id = duel.content1_id if vote_for == 'content1' else duel.content2_id
+            
+            vote = DuelVote(
+                duel_id=duel_id,
+                user_id=user_id,
+                content_id=content_id
+            )
+            
+            session.add(vote)
+            
+            # Оновлюємо лічильники дуелі
+            if vote_for == 'content1':
+                duel.content1_votes += 1
+            else:
+                duel.content2_votes += 1
+            
+            duel.total_votes += 1
+            
+            session.commit()
+            
+            logger.info(f"User {user_id} voted for {vote_for} in duel {duel_id}")
             
             return {
-                'id': content.id,
-                'type': content.content_type,
-                'status': content.status,
-                'text': content.text,
-                'media_url': content.media_url,
-                'author_name': author_name,
-                'author_user_id': content.author_user_id,
-                'views': content.views,
-                'likes': content.likes,
-                'dislikes': content.dislikes,
-                'created_at': content.created_at,
-                'moderated_at': content.moderated_at,
-                'moderated_by': content.moderated_by,
-                'rejection_reason': content.rejection_reason
+                'success': True,
+                'votes': {
+                    'content1_votes': duel.content1_votes,
+                    'content2_votes': duel.content2_votes,
+                    'total_votes': duel.total_votes
+                }
             }
             
     except Exception as e:
-        logger.error(f"Error getting content by ID {content_id}: {e}")
-        return None
+        logger.error(f"Error voting in duel {duel_id}: {e}")
+        return {'success': False, 'error': 'Помилка голосування'}
 
-# ===== ТЕСТУВАННЯ =====
-
-def test_database_connection() -> bool:
-    """Тестування з'єднання з базою даних"""
+async def finish_duel(duel_id: int) -> Optional[Dict[str, Any]]:
+    """Завершення дуелі та визначення переможця"""
     try:
+        from .models import Duel, DuelStatus, Content
+        from datetime import datetime
+        
         with get_db_session() as session:
-            # Простий тестовий запит
-            result = session.execute("SELECT 1").fetchone()
-            return result is not None
+            duel = session.query(Duel).filter(Duel.id == duel_id).first()
+            
+            if not duel or duel.status != DuelStatus.ACTIVE:
+                return None
+            
+            # Визначаємо переможця
+            winner_content_id = None
+            if duel.content1_votes > duel.content2_votes:
+                winner_content_id = duel.content1_id
+            elif duel.content2_votes > duel.content1_votes:
+                winner_content_id = duel.content2_id
+            # Якщо голоси рівні - нічия (winner_content_id залишається None)
+            
+            # Оновлюємо дуель
+            duel.status = DuelStatus.FINISHED
+            duel.winner_content_id = winner_content_id
+            duel.finished_at = datetime.utcnow()
+            
+            session.commit()
+            
+            # Нараховуємо бали учасникам
+            await award_duel_points(duel_id, winner_content_id)
+            
+            logger.info(f"Duel {duel_id} finished, winner: content {winner_content_id}")
+            
+            return await get_duel_by_id(duel_id)
             
     except Exception as e:
-        logger.error(f"Database connection test failed: {e}")
-        return False
+        logger.error(f"Error finishing duel {duel_id}: {e}")
+        return None
+
+async def award_duel_points(duel_id: int, winner_content_id: Optional[int]):
+    """Нарахування балів за дуель"""
+    try:
+        from .models import Duel, Content
+        
+        # Отримуємо повну інформацію про дуель
+        duel_info = await get_duel_by_id(duel_id)
+        if not duel_info:
+            return
+        
+        content1_author = duel_info['content1']['author_id']
+        content2_author = duel_info['content2']['author_id']
+        
+        votes1 = duel_info['content1_votes']
+        votes2 = duel_info['content2_votes']
+        total_votes = duel_info['total_votes']
+        
+        # Базові бали за участь
+        await update_user_points(content1_author, 10, f"Участь у дуелі #{duel_id}")
+        await update_user_points(content2_author, 10, f"Участь у дуелі #{duel_id}")
+        
+        if winner_content_id:
+            # Бали за перемогу
+            winner_author = content1_author if winner_content_id == duel_info['content1_id'] else content2_author
+            winner_votes = votes1 if winner_content_id == duel_info['content1_id'] else votes2
+            
+            base_win_points = 25
+            
+            # Бонус за розгромну перемогу (70%+ голосів)
+            if total_votes > 0:
+                win_percentage = winner_votes / total_votes
+                if win_percentage >= 0.7:
+                    base_win_points += 25  # Epic victory bonus
+                    await update_user_points(winner_author, 50, f"Розгромна перемога в дуелі #{duel_id}")
+                else:
+                    await update_user_points(winner_author, base_win_points, f"Перемога в дуелі #{duel_id}")
+            else:
+                await update_user_points(winner_author, base_win_points, f"Перемога в дуелі #{duel_id}")
+        else:
+            # Нічия - додаткові бали обом
+            await update_user_points(content1_author, 5, f"Нічия в дуелі #{duel_id}")
+            await update_user_points(content2_author, 5, f"Нічия в дуелі #{duel_id}")
+        
+    except Exception as e:
+        logger.error(f"Error awarding duel points for duel {duel_id}: {e}")
+
+async def get_user_duel_stats(user_id: int) -> Optional[Dict[str, Any]]:
+    """Отримання статистики дуелів користувача"""
+    try:
+        from .models import Duel, Content, DuelStatus
+        
+        with get_db_session() as session:
+            # Знаходимо всі дуелі де користувач брав участь
+            user_duels = session.query(Duel).join(
+                Content, 
+                (Duel.content1_id == Content.id) | (Duel.content2_id == Content.id)
+            ).filter(
+                Content.author_id == user_id,
+                Duel.status == DuelStatus.FINISHED
+            ).all()
+            
+            if not user_duels:
+                return None
+            
+            wins = 0
+            losses = 0
+            draws = 0
+            total_votes_received = 0
+            best_win_streak = 0
+            current_streak = 0
+            
+            for duel in user_duels:
+                # Визначаємо чи користувач переміг
+                user_content_id = None
+                user_votes = 0
+                opponent_votes = 0
+                
+                # Знаходимо контент користувача
+                if duel.content1_id:
+                    content1 = session.query(Content).filter(Content.id == duel.content1_id).first()
+                    if content1 and content1.author_id == user_id:
+                        user_content_id = duel.content1_id
+                        user_votes = duel.content1_votes
+                        opponent_votes = duel.content2_votes
+                
+                if not user_content_id and duel.content2_id:
+                    content2 = session.query(Content).filter(Content.id == duel.content2_id).first()
+                    if content2 and content2.author_id == user_id:
+                        user_content_id = duel.content2_id
+                        user_votes = duel.content2_votes
+                        opponent_votes = duel.content1_votes
+                
+                total_votes_received += user_votes
+                
+                # Підраховуємо результат
+                if user_votes > opponent_votes:
+                    wins += 1
+                    current_streak += 1
+                    best_win_streak = max(best_win_streak, current_streak)
+                elif user_votes < opponent_votes:
+                    losses += 1
+                    current_streak = 0
+                else:
+                    draws += 1
+                    current_streak = 0
+            
+            # Розрахунок рейтингу (базовий алгоритм)
+            total_duels = len(user_duels)
+            win_rate = wins / total_duels if total_duels > 0 else 0
+            base_rating = 1000
+            rating = base_rating + int((wins * 30) - (losses * 15) + (draws * 5))
+            
+            # Мінімальний та максимальний рейтинг
+            rating = max(500, min(3000, rating))
+            
+            return {
+                'wins': wins,
+                'losses': losses,
+                'draws': draws,
+                'total_duels': total_duels,
+                'win_rate': win_rate,
+                'rating': rating,
+                'total_votes_received': total_votes_received,
+                'best_win_streak': best_win_streak,
+                'current_streak': current_streak
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting duel stats for user {user_id}: {e}")
+        return None
+
+async def get_user_active_duels(user_id: int) -> List[Dict[str, Any]]:
+    """Отримання активних дуелів користувача"""
+    try:
+        from .models import Duel, Content, DuelStatus
+        
+        with get_db_session() as session:
+            # Знаходимо активні дуелі де користувач має контент
+            active_duels = session.query(Duel).join(
+                Content,
+                (Duel.content1_id == Content.id) | (Duel.content2_id == Content.id)
+            ).filter(
+                Content.author_id == user_id,
+                Duel.status == DuelStatus.ACTIVE
+            ).all()
+            
+            result = []
+            for duel in active_duels:
+                result.append({
+                    'id': duel.id,
+                    'content1_votes': duel.content1_votes,
+                    'content2_votes': duel.content2_votes,
+                    'total_votes': duel.total_votes,
+                    'ends_at': duel.ends_at,
+                    'created_at': duel.created_at
+                })
+            
+            return result
+            
+    except Exception as e:
+        logger.error(f"Error getting active duels for user {user_id}: {e}")
+        return []
+
+async def get_random_approved_content(content_type: 'ContentType') -> Optional[Dict[str, Any]]:
+    """Отримання випадкового схваленого контенту"""
+    try:
+        from .models import Content, ContentStatus
+        import random
+        
+        with get_db_session() as session:
+            # Отримуємо всі схвалені контенти заданого типу
+            contents = session.query(Content).filter(
+                Content.content_type == content_type,
+                Content.status == ContentStatus.APPROVED
+            ).all()
+            
+            if not contents:
+                return None
+            
+            # Вибираємо випадковий
+            selected = random.choice(contents)
+            
+            return {
+                'id': selected.id,
+                'text': selected.text,
+                'type': selected.content_type,
+                'author_id': selected.author_id,
+                'created_at': selected.created_at
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting random approved content: {e}")
+        return None
+
+async def get_duel_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
+    """Отримання топу дуелістів"""
+    try:
+        from .models import User
+        
+        leaderboard = []
+        
+        with get_db_session() as session:
+            # Отримуємо топових користувачів за балами
+            top_users = session.query(User).order_by(
+                User.total_points.desc()
+            ).limit(limit * 2).all()  # Беремо більше щоб відфільтрувати тих хто має дуельну статистику
+            
+            for user in top_users:
+                stats = await get_user_duel_stats(user.id)
+                if stats and stats['total_duels'] > 0:
+                    leaderboard.append({
+                        'user_id': user.id,
+                        'username': user.username,
+                        'full_name': user.full_name,
+                        'total_points': user.total_points,
+                        'duel_rating': stats['rating'],
+                        'duel_wins': stats['wins'],
+                        'duel_total': stats['total_duels'],
+                        'win_rate': stats['win_rate']
+                    })
+                
+                if len(leaderboard) >= limit:
+                    break
+            
+            # Сортуємо за дуельним рейтингом
+            leaderboard.sort(key=lambda x: x['duel_rating'], reverse=True)
+            
+            return leaderboard[:limit]
+            
+    except Exception as e:
+        logger.error(f"Error getting duel leaderboard: {e}")
+        return []
+
+async def cleanup_old_duels():
+    """Очистка старих завершених дуелів (старше 30 днів)"""
+    try:
+        from .models import Duel, DuelStatus, DuelVote
+        from datetime import datetime, timedelta
+        
+        cutoff_date = datetime.utcnow() - timedelta(days=30)
+        
+        with get_db_session() as session:
+            # Знаходимо старі дуелі
+            old_duels = session.query(Duel).filter(
+                Duel.status == DuelStatus.FINISHED,
+                Duel.finished_at < cutoff_date
+            ).all()
+            
+            deleted_count = 0
+            
+            for duel in old_duels:
+                # Видаляємо пов'язані голоси
+                session.query(DuelVote).filter(DuelVote.duel_id == duel.id).delete()
+                
+                # Видаляємо дуель
+                session.delete(duel)
+                deleted_count += 1
+            
+            session.commit()
+            
+            if deleted_count > 0:
+                logger.info(f"Cleaned up {deleted_count} old duels")
+            
+            return deleted_count
+            
+    except Exception as e:
+        logger.error(f"Error cleaning up old duels: {e}")
+        return 0
+
+# ===== ПЛАНУВАЛЬНИК ДУЕЛІВ =====
+
+async def auto_finish_expired_duels():
+    """Автоматичне завершення прострочених дуелів"""
+    try:
+        from .models import Duel, DuelStatus
+        from datetime import datetime
+        
+        with get_db_session() as session:
+            # Знаходимо прострочені активні дуелі
+            now = datetime.utcnow()
+            expired_duels = session.query(Duel).filter(
+                Duel.status == DuelStatus.ACTIVE,
+                Duel.ends_at <= now,
+                Duel.total_votes >= Duel.min_votes
+            ).all()
+            
+            finished_count = 0
+            
+            for duel in expired_duels:
+                await finish_duel(duel.id)
+                finished_count += 1
+            
+            if finished_count > 0:
+                logger.info(f"Auto-finished {finished_count} expired duels")
+            
+            return finished_count
+            
+    except Exception as e:
+        logger.error(f"Error auto-finishing duels: {e}")
+        return 0
