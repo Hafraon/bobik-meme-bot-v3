@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🚀 ГОЛОВНИЙ ФАЙЛ УКРАЇНОМОВНОГО БОТА - ВИПРАВЛЕНИЙ 🚀
+🚀 ГОЛОВНИЙ ФАЙЛ УКРАЇНОМОВНОГО БОТА - ОСТАТОЧНО ВИПРАВЛЕНИЙ 🚀
 """
 
 import asyncio
 import logging
 import sys
-from typing import Optional, List, Dict, Any, Union  # ✅ ВСІ TYPING ІМПОРТИ
+from typing import Optional, List, Dict, Any, Union
 
 # Налаштування логування
 logging.basicConfig(
@@ -72,10 +72,7 @@ class AutomatedUkrainianTelegramBot:
     async def setup_automation(self) -> bool:
         """Налаштування автоматизації"""
         try:
-            # ✅ ВИПРАВЛЕНО: Правильний імпорт та виклик
             from services.automated_scheduler import create_automated_scheduler
-            
-            # ✅ ВИПРАВЛЕНО: Правильні аргументи (2 параметри)
             self.scheduler = await create_automated_scheduler(self.bot, self.db_available)
             
             if self.scheduler:
@@ -91,37 +88,164 @@ class AutomatedUkrainianTelegramBot:
     async def setup_handlers(self):
         """Налаштування хендлерів"""
         try:
+            # Спроба імпорту основних handlers
             from handlers import register_all_handlers
             register_all_handlers(self.dp)
-            logger.info("✅ All handlers registered with automation support")
+            logger.info("✅ All handlers registered successfully")
+        except ImportError as e:
+            logger.warning(f"⚠️ Main handlers unavailable: {e}")
+            await self._register_emergency_handlers()
         except Exception as e:
-            logger.warning(f"⚠️ Handlers warning: {e}")
-            # Базові хендлери як fallback
-            await self._register_basic_handlers()
+            logger.error(f"❌ Handlers error: {e}")
+            await self._register_emergency_handlers()
 
-    async def _register_basic_handlers(self):
-        """Базові хендлери"""
-        from aiogram.types import Message
-        from aiogram.filters import Command
+    async def _register_emergency_handlers(self):
+        """Аварійні handlers для всіх типів повідомлень"""
+        from aiogram import F
+        from aiogram.types import Message, CallbackQuery, InlineQuery
+        from aiogram.filters import Command, CommandStart
         
-        @self.dp.message(Command("start"))
+        logger.info("🆘 Реєстрація аварійних handlers...")
+        
+        # Команда /start
+        @self.dp.message(CommandStart())
         async def start_handler(message: Message):
-            await message.answer("🤖 Привіт! Я український мем-бот!")
+            await message.answer(
+                "🤖 <b>Привіт! Я український мем-бот з гейміфікацією!</b>\n\n"
+                "📋 <b>Команди:</b>\n"
+                "• /help - довідка\n"
+                "• /meme - випадковий мем\n"
+                "• /anekdot - український анекдот\n"
+                "• /profile - мій профіль\n"
+                "• /admin - панель адміна"
+            )
+        
+        # Команда /help
+        @self.dp.message(Command("help"))
+        async def help_handler(message: Message):
+            await message.answer(
+                "❓ <b>ДОВІДКА ПО БОТУ</b>\n\n"
+                "🎮 <b>Гейміфікація:</b>\n"
+                "• Заробляйте бали за активність\n"
+                "• Підвищуйте свій ранг\n\n"
+                "📝 <b>Контент:</b>\n"
+                "• /meme - випадковий мем\n"
+                "• /anekdot - український анекдот\n\n"
+                "👤 <b>Профіль:</b>\n"
+                "• /profile - ваш профіль"
+            )
+        
+        # Команда /meme
+        @self.dp.message(Command("meme"))
+        async def meme_handler(message: Message):
+            memes = [
+                "😂 <b>Програміст і кава</b>\n\nПрограміст заходить в кафе і замовляє каву.\nБариста: 'Java чи Python?'\nПрограміст: 'Звичайну!'",
+                "🤣 <b>Різдво та Хеллоуїн</b>\n\nЧому програмісти плутають Різдво та Хеллоуїн?\nБо Oct 31 == Dec 25!",
+                "😄 <b>Лампочка</b>\n\nСкільки програмістів треба щоб закрутити лампочку?\nЖодного - це апаратна проблема!"
+            ]
+            import random
+            await message.answer(f"🎭 {random.choice(memes)}")
+        
+        # Команда /anekdot
+        @self.dp.message(Command("anekdot"))
+        async def anekdot_handler(message: Message):
+            anekdots = [
+                "🇺🇦 <b>Програмісти</b>\n\nУкраїнець написав код.\nБілорус оптимізував.\nРосіянин скопіював і сказав що сам придумав.",
+                "😂 <b>У лікаря</b>\n\nПрограміст: 'Болить спина!'\nЛікар: 'Багато сидиш?'\nПрограміст: 'Тільки 18 годин!'\nЛікар: 'Нормально!'",
+                "🤣 <b>Природа</b>\n\nЧому програмісти не люблять природу?\nБагато багів і немає документації!"
+            ]
+            import random
+            await message.answer(f"🎭 {random.choice(anekdots)}")
+        
+        # Команда /profile
+        @self.dp.message(Command("profile"))
+        async def profile_handler(message: Message):
+            user = message.from_user
+            await message.answer(
+                f"👤 <b>ПРОФІЛЬ</b>\n\n"
+                f"🆔 ID: <code>{user.id}</code>\n"
+                f"👤 Ім'я: {user.first_name or 'Невідоме'}\n"
+                f"📱 Username: @{user.username or 'Немає'}\n"
+                f"📊 Бали: <b>0</b>\n"
+                f"🏆 Ранг: 🤡 <b>Новачок</b>"
+            )
+        
+        # Команда /admin
+        @self.dp.message(Command("admin"))
+        async def admin_handler(message: Message):
+            try:
+                import os
+                admin_id = int(os.getenv("ADMIN_ID", 603047391))
+                if message.from_user.id == admin_id:
+                    await message.answer(
+                        "👑 <b>ПАНЕЛЬ АДМІНІСТРАТОРА</b>\n\n"
+                        "🛠️ <b>Статус:</b> Активний\n"
+                        "📊 Функції в розробці..."
+                    )
+                else:
+                    await message.answer("❌ Немає прав адміністратора")
+            except:
+                await message.answer("❌ Помилка перевірки прав")
+        
+        # Обробка всіх інших текстових повідомлень
+        @self.dp.message(F.text)
+        async def text_handler(message: Message):
+            await message.answer(
+                "🤖 Привіт! Використовуйте команди:\n\n"
+                "/start - почати\n"
+                "/help - довідка\n"
+                "/meme - мем\n"
+                "/anekdot - анекдот"
+            )
+        
+        # Обробка callback queries
+        @self.dp.callback_query()
+        async def callback_handler(callback: CallbackQuery):
+            await callback.answer("🔧 Функція в розробці!")
+        
+        # Обробка всіх інших повідомлень
+        @self.dp.message()
+        async def any_message_handler(message: Message):
+            await message.answer("🤖 Надішліть текстове повідомлення або використовуйте /help")
+        
+        # Error handler
+        @self.dp.error()
+        async def error_handler(event, exception):
+            logger.error(f"❌ Error: {exception}")
+            try:
+                if hasattr(event, 'message') and event.message:
+                    await event.message.answer("😅 Технічна помилка! Спробуйте /help")
+            except:
+                pass
+        
+        logger.info("✅ Аварійні handlers зареєстровано")
 
     async def cleanup(self):
-        """✅ ВИПРАВЛЕНО: Cleanup ресурсів"""
+        """✅ ВИПРАВЛЕНО: Правильне очищення ресурсів"""
         try:
             if self.scheduler:
                 await self.scheduler.stop()
             
-            # ✅ ВИПРАВЛЕНО: Правильне закриття aiohttp сесії
-            if self.bot and hasattr(self.bot, 'session') and self.bot.session:
-                if not self.bot.session.closed:
-                    await self.bot.session.close()
-                    logger.info("✅ Bot session closed")
+            # ✅ ВИПРАВЛЕНО: Правильна перевірка aiohttp сесії
+            if self.bot:
+                try:
+                    # Новий спосіб перевірки сесії в aiogram 3.x
+                    if hasattr(self.bot, 'session') and self.bot.session:
+                        if not self.bot.session.closed():  # ✅ Виклик методу closed()
+                            await self.bot.session.close()
+                            logger.info("✅ Bot session closed")
+                except AttributeError:
+                    # Fallback для старших версій
+                    try:
+                        await self.bot.close()
+                        logger.info("✅ Bot closed (fallback)")
+                    except:
+                        logger.warning("⚠️ Bot cleanup skipped")
+                except Exception as e:
+                    logger.warning(f"⚠️ Session cleanup warning: {e}")
                     
         except Exception as e:
-            logger.error(f"❌ Cleanup error: {e}")
+            logger.warning(f"⚠️ Cleanup warning: {e}")
 
     async def run(self) -> bool:
         """Запуск бота"""
@@ -138,7 +262,7 @@ class AutomatedUkrainianTelegramBot:
             
             logger.info("🎯 Bot fully initialized with automation support")
             
-            # Запуск polling з graceful shutdown
+            # Запуск polling
             try:
                 await self.dp.start_polling(self.bot)
             except KeyboardInterrupt:
@@ -148,7 +272,6 @@ class AutomatedUkrainianTelegramBot:
             logger.error(f"❌ Critical error: {e}")
             return False
         finally:
-            # ✅ ВИПРАВЛЕНО: Cleanup ресурсів
             await self.cleanup()
 
 async def main():
@@ -158,7 +281,6 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        # ✅ ВИПРАВЛЕНО: правильний запуск
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("⏹️ Program interrupted")
