@@ -2,7 +2,7 @@
 
 # ===== ОСНОВНИЙ ПРОЦЕС =====
 # ✅ ВИПРАВЛЕНО: Правильний запуск через main.py з app/
-web: cd app && python main.py
+web: python main.py
 
 # ===== АЛЬТЕРНАТИВНІ ВАРІАНТИ ЗАПУСКУ =====
 
@@ -13,10 +13,10 @@ web: cd app && python main.py
 # web: python -m app.main
 
 # З додатковими параметрами:
-# web: cd app && python main.py --production
+# web: python main.py --production
 
 # З логуванням:
-# web: cd app && python main.py 2>&1 | tee bot.log
+# web: python main.py 2>&1 | tee bot.log
 
 # ===== ДОДАТКОВІ ПРОЦЕСИ (ОПЦІОНАЛЬНО) =====
 
