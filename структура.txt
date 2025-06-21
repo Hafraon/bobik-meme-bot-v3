@@ -1,0 +1,85 @@
+Folder PATH listing for volume E
+Volume serial number is A816-87BD
+E:.
+³   .env.example
+³   .gitignore
+³   alembic.ini
+³   deploy_structure_script.py
+³   diagnostic_script.py
+³   emergency_recovery.py
+³   main.py
+³   Procfile
+³   requirements.txt
+³   áâàãªâãà .txt
+³   ?? test_duels.py
+³   ?? emergency_fix.py
+³   ?? docker-compose.yml
+³   ?? Dockerfile
+³   ?? db_diagnostic.py
+³   ?? update_step5.py
+³   ?? update_step6.py
+³   ?? apply_all_fixes.py
+³   ?? fix_critical_bugs.py
+³   ??? fix_db.py
+³   ??? test_admin.py
+³   ?? test_automation.py
+³   ?? test_content.py
+³   
+ÃÄÄÄapp
+³   ³   init.py
+³   ³   main.py
+³   ³   
+³   ÃÄÄÄconfig
+³   ³       localization.py
+³   ³       settings.py
+³   ³       __init__.py
+³   ³       
+³   ÃÄÄÄdatabase
+³   ³       database.py
+³   ³       models.py
+³   ³       services.py
+³   ³       __init__.py
+³   ³       
+³   ÃÄÄÄhandlers
+³   ³       admin_handlers.py
+³   ³       admin_panel_handlers.py
+³   ³       basic_commands.py
+³   ³       content_handlers.py
+³   ³       duel_handlers.py
+³   ³       gamification_handlers.py
+³   ³       moderation_handlers.py
+³   ³       __init__.py
+³   ³       
+³   ÃÄÄÄkeyboards
+³   ÃÄÄÄservices
+³   ³       admin_services.py
+³   ³       automated_scheduler.py
+³   ³       broadcast_system.py
+³   ³       content_generator.py
+³   ³       scheduler.py
+³   ³       __init__.py
+³   ³       
+³   ÀÄÄÄutils
+³           formatters.py
+³           helpers.py
+³           __init__.py
+³           
+ÃÄÄÄdata
+ÃÄÄÄdeployment
+³       Procfile
+³       railway.json
+³       requirements.txt
+³       
+ÃÄÄÄdocker
+³       docker-compose.yml
+³       
+ÃÄÄÄdocs
+³       DEPLOYMENT.md
+³       PROJECT_SUMMARY.md
+³       README.md
+³       ?? ?‘’“Š–?ô_‚ˆ€‚‹…œ.md
+³       
+ÃÄÄÄscripts
+ÀÄÄÄtests
+        __init__.py
+        

@@ -1,325 +1,247 @@
-async def register_handlers(self):
-        """Реєстрація всіх обробників команд"""
-        try:
-            logger.info("📝 Реєстрація обробників...")
+async def launch_app_main():
+    """Адаптивний запуск основного коду з app/main.py"""
+    
+    logger.info("🔄 Адаптивний імпорт та запуск app/main.py...")
+    print("🔄 Adaptive import and launch app/main.py...", flush=True)
+    
+    try:
+        # Імпорт модуля app/main.py
+        import main as app_module
+        
+        logger.info("✅ app/main.py успішно імпортовано")
+        print("✅ app/main.py imported successfully", flush=True)
+        
+        # ===== АДАПТИВНИЙ ЗАПУСК - СПРОБУЄМО ВСІ ВАРІАНТИ =====
+        
+        # Варіант 1: Функція main()
+        if hasattr(app_module, 'main') and callable(getattr(app_module, 'main')):
+            logger.info("🎯 Знайдено функцію main(), запускаємо...")
+            print("🎯 Found main() function, launching...", flush=True)
             
-            # Основні команди
-            @self.dp.message(Command("start"))
-            async def cmd_start(message: Message):
-                user_mention = f"<a href='tg://user?id={message.from_user.id}'>{message.from_user.first_name}</a>"
-                
-                start_text = f"""
-🧠😂🔥 Вітаю, {user_mention}!
-
-🤖 Я - професійний україномовний бот з повною автоматизацією!
-
-✅ Автоматизація: {'Активна' if self.automation_active else 'Неактивна'}
-💾 База даних: {'Підключена' if self.db_available else 'Fallback режим'}
-⏰ Запущено: {self.startup_time.strftime('%H:%M %d.%m.%Y')}
-
-🎮 Використовуй /help для списку команд!
-                """
-                
-                await message.answer(start_text.strip())
-                
-                # ✅ ВИПРАВЛЕНО: Показуємо адмін меню для адміністраторів
-                if self.is_admin(message.from_user.id):
-                    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-                    
-                    admin_keyboard = ReplyKeyboardMarkup(
-                        keyboard=[
-                            [KeyboardButton(text="👑 Адмін панель"), KeyboardButton(text="📊 Статистика")],
-                            [KeyboardButton(text="🛡️ Модерація"), KeyboardButton(text="📢 Розсилка")],
-                            [KeyboardButton(text="❌ Вимкнути адмін меню")]
-                        ],
-                        resize_keyboard=True,
-                        one_time_keyboard=False
-                    )
-                    
-                    await message.answer(
-                        f"👑 <b>Режим адміністратора активовано!</b>\n\n"
-                        f"Використовуйте кнопки меню або команди:\n"
-                        f"• /admin - повна адмін панель\n"
-                        f"• /moderate - швидка модерація\n"
-                        f"• /stats - детальна статистика",
-                        reply_markup=admin_keyboard
-                    )
-
-            @self.dp.message(Command("help"))
-            async def cmd_help(message: Message):
-                help_text = """
-🧠😂🔥 <b>КОМАНДИ БОТА</b> 🧠😂🔥
-
-👤 <b>Користувацькі команди:</b>
-/start - запуск та головне меню
-/help - цей список команд
-/status - статус бота та автоматизації
-/stats - статистика бота
-
-🎮 <b>Розваги:</b>
-/meme - випадковий мем
-/joke - український жарт
-/anekdot - смішний анекдот
-
-🏆 <b>Гейміфікація:</b>
-/profile - твій профіль
-/top - таблиця лідерів
-/achievements - досягнення
-
-⚔️ <b>Дуелі:</b>
-/duel - запустити дуель жартів
-/duel_stats - статистика дуелей
-
-📝 <b>Контент:</b>
-/submit - надіслати свій жарт/мем
-/my_content - мої подання
-
-🛡️ <b>Для адмінів:</b>
-/admin - адмін панель
-/moderate - модерація контенту
-/pending - контент на розгляді
-
-🎯 <b>Автоматизація:</b>
-- 🌅 Ранкові розсилки (09:00)
-- 📊 Вечірня статистика (20:00)  
-- 🏆 Тижневі турніри (П'ятниця)
-- ⚔️ Автоматичні дуелі
-- 🎉 Святкові привітання
-
-💡 <i>Бот працює повністю автоматично!</i>
-                """
-                await message.answer(help_text)
-
-            @self.dp.message(Command("status"))
-            async def cmd_status(message: Message):
-                uptime = datetime.now() - self.startup_time
-                uptime_str = f"{uptime.days}д {uptime.seconds//3600}г {(uptime.seconds//60)%60}хв"
-                
-                status_text = f"""
-🔧 <b>СТАТУС БОТА</b>
-
-🤖 <b>Основна інформація:</b>
-├ Статус: ✅ Онлайн
-├ Час роботи: {uptime_str}
-├ Запуск: {self.startup_time.strftime('%H:%M %d.%m.%Y')}
-└ Режим: Production
-
-💾 <b>База даних:</b>
-└ Стан: {'✅ Підключена' if self.db_available else '⚠️ Fallback режим'}
-
-🤖 <b>Автоматизація:</b>
-├ Статус: {'✅ Активна' if self.automation_active else '❌ Неактивна'}
-├ Планувальник: {'✅ Працює' if self.scheduler else '❌ Не запущено'}
-└ Завдань виконується: {len(getattr(self.scheduler, 'jobs', [])) if self.scheduler else 0}
-
-🎯 <b>Функціональність:</b>
-├ Меню та команди: ✅ Працюють
-├ Жарти та меми: ✅ Доступні
-├ Дуелі: ✅ Активні
-├ Статистика: ✅ Збирається
-└ Модерація: ✅ Функціональна
-
-💡 <i>Всі системи працюють стабільно!</i>
-                """
-                await message.answer(status_text)
-
-            # ✅ ВИПРАВЛЕНО: Правильна реєстрація адмін команд
-            @self.dp.message(Command("admin"))
-            async def cmd_admin(message: Message):
-                # Перевірка прав ВСЕРЕДИНІ хендлера
-                if not self.is_admin(message.from_user.id):
-                    await message.answer("❌ Доступ заборонено. Тільки для адміністраторів.")
-                    return
-                
-                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"),
-                        InlineKeyboardButton(text="🛡️ Модерація", callback_data="admin_moderate")
-                    ],
-                    [
-                        InlineKeyboardButton(text="👥 Користувачі", callback_data="admin_users"),
-                        InlineKeyboardButton(text="📝 Контент", callback_data="admin_content")
-                    ],
-                    [
-                        InlineKeyboardButton(text="🔥 Трендове", callback_data="admin_trending"),
-                        InlineKeyboardButton(text="⚙️ Налаштування", callback_data="admin_settings")
-                    ],
-                    [
-                        InlineKeyboardButton(text="🚀 Масові дії", callback_data="admin_bulk"),
-                        InlineKeyboardButton(text="💾 Бекап", callback_data="admin_backup")
-                    ]
-                ])
-                
-                admin_text = f"""
-👑 <b>АДМІН ПАНЕЛЬ</b>
-
-👤 <b>Адміністратор:</b> {message.from_user.first_name}
-🕐 <b>Час доступу:</b> {datetime.now().strftime('%H:%M %d.%m.%Y')}
-
-📊 <b>Швидка статистика:</b>
-├ Час роботи: {(datetime.now() - self.startup_time).seconds // 3600}г
-├ База даних: {'✅ Підключена' if self.db_available else '⚠️ Fallback'}
-├ Автоматизація: {'✅ Активна' if self.automation_active else '❌ Неактивна'}
-└ Планувальник: {'✅ Працює' if self.scheduler else '❌ Не запущено'}
-
-🛠️ <b>Швидкі команди:</b>
-• /moderate - почати модерацію
-• /pending - контент на розгляді
-• /stats - детальна статистика
-• /broadcast - розсилка повідомлень
-
-⚡ <b>Виберіть дію з меню нижче:</b>
-                """
-                
-                await message.answer(admin_text.strip(), reply_markup=keyboard)
-
-            @self.dp.message(Command("moderate"))
-            async def cmd_moderate(message: Message):
-                if not self.is_admin(message.from_user.id):
-                    await message.answer("❌ Доступ заборонено.")
-                    return
-                
-                await message.answer(
-                    "🛡️ <b>МОДЕРАЦІЯ КОНТЕНТУ</b>\n\n"
-                    "🔍 Пошук контенту на розгляді...\n"
-                    "📋 Функція модерації буде доступна після повного підключення БД.\n\n"
-                    "💡 Наразі бот працює в fallback режимі з базовими функціями."
-                )
-
-            @self.dp.message(Command("stats"))
-            async def cmd_stats(message: Message):
-                if not self.is_admin(message.from_user.id):
-                    # Базова статистика для звичайних користувачів
-                    await message.answer(
-                        "📊 <b>СТАТИСТИКА БОТА</b>\n\n"
-                        f"🤖 Статус: ✅ Онлайн\n"
-                        f"⏰ Запущено: {self.startup_time.strftime('%H:%M %d.%m.%Y')}\n"
-                        f"🎯 Автоматизація: {'Активна' if self.automation_active else 'Неактивна'}\n\n"
-                        f"💡 Детальна статистика доступна тільки адміністраторам."
-                    )
-                    return
-                
-                # Детальна статистика для адмінів
-                uptime = datetime.now() - self.startup_time
-                uptime_str = f"{uptime.days}д {uptime.seconds//3600}г {(uptime.seconds//60)%60}хв"
-                
-                stats_text = f"""
-📊 <b>ДЕТАЛЬНА СТАТИСТИКА БОТА</b>
-
-🤖 <b>Система:</b>
-├ Статус: ✅ Онлайн
-├ Час роботи: {uptime_str}  
-├ Запуск: {self.startup_time.strftime('%H:%M %d.%m.%Y')}
-├ Режим: Production
-└ Версія: 2.0 (Railway)
-
-💾 <b>База даних:</b>
-├ Стан: {'✅ Підключена' if self.db_available else '⚠️ Fallback режим'}
-├ Тип: {'PostgreSQL' if self.db_available else 'In-memory fallback'}
-└ З'єднання: {'Стабільне' if self.db_available else 'Недоступне'}
-
-🤖 <b>Автоматизація:</b>
-├ Статус: {'✅ Активна' if self.automation_active else '❌ Неактивна'}
-├ Планувальник: {'✅ Працює' if self.scheduler else '❌ Не запущено'}
-├ Завдань активно: {len(getattr(self.scheduler, 'jobs', [])) if self.scheduler else 0}
-└ Останній запуск: {datetime.now().strftime('%H:%M')}
-
-🎯 <b>Функціональність:</b>
-├ Команди: ✅ Повністю працюють
-├ Інлайн меню: ✅ Активні
-├ Адмін панель: ✅ Доступна
-├ Модерація: {'✅ Активна' if self.db_available else '⚠️ Обмежена'}
-├ Гейміфікація: {'✅ Повна' if self.db_available else '⚠️ Базова'}
-└ Дуелі: {'✅ Активні' if self.db_available else '⚠️ Тестовий режим'}
-
-🌍 <b>Середовище:</b>
-├ Platform: Railway
-├ Region: Europe-West4
-├ Memory: 512MB
-└ Storage: 1GB
-
-💡 <b>Рекомендації:</b>
-{' Всі системи працюють оптимально!' if self.db_available else '⚠️ Для повної функціональності підключіть PostgreSQL БД.'}
-                """
-                
-                await message.answer(stats_text.strip())
-
-            # Обробка адмін кнопок
-            @self.dp.message()
-            async def handle_admin_buttons(message: Message):
-                if not self.is_admin(message.from_user.id):
-                    return
-                
-                text = message.text
-                
-                if text == "👑 Адмін панель":
-                    await cmd_admin(message)
-                elif text == "📊 Статистика":
-                    await cmd_stats(message)
-                elif text == "🛡️ Модерація":
-                    await cmd_moderate(message)
-                elif text == "📢 Розсилка":
-                    await message.answer(
-                        "📢 <b>СИСТЕМА РОЗСИЛКИ</b>\n\n"
-                        "🚀 Функція масової розсилки буде доступна після підключення повної БД.\n\n"
-                        "💡 Наразі можна використовувати команди для окремих повідомлень."
-                    )
-                elif text == "❌ Вимкнути адмін меню":
-                    from aiogram.types import ReplyKeyboardRemove
-                    await message.answer(
-                        "✅ Адмін меню вимкнено.\n"
-                        "Використовуйте команди /admin, /moderate, /stats для роботи.",
-                        reply_markup=ReplyKeyboardRemove()
-                    )
-
-            # Обробка callback запитів адмін панелі
-            @self.dp.callback_query()
-            async def handle_admin_callbacks(callback: CallbackQuery):
-                if not self.is_admin(callback.from_user.id):
-                    await callback.answer("❌ Доступ заборонено", show_alert=True)
-                    return
-                
-                data = callback.data
-                
-                if data == "admin_stats":
-                    await callback.message.edit_text(
-                        "📊 <b>ДЕТАЛЬНА СТАТИСТИКА</b>\n\n"
-                        f"🤖 Статус: ✅ Онлайн\n"
-                        f"💾 БД: {'Підключена' if self.db_available else 'Fallback'}\n"
-                        f"🤖 Автоматизація: {'Активна' if self.automation_active else 'Неактивна'}\n"
-                        f"⏰ Запуск: {self.startup_time.strftime('%H:%M %d.%m.%Y')}\n\n"
-                        f"💡 Повна статистика доступна через /stats"
-                    )
-                elif data == "admin_moderate":
-                    await callback.message.edit_text(
-                        "🛡️ <b>ПАНЕЛЬ МОДЕРАЦІЇ</b>\n\n"
-                        "📋 Контент на розгляді: 0\n"
-                        "✅ Схвалено сьогодні: 0\n"
-                        "❌ Відхилено сьогодні: 0\n\n"
-                        "💡 Повна модерація буде доступна після підключення БД.\n"
-                        "Використовуйте /moderate для початку."
-                    )
-                elif data == "admin_users":
-                    await callback.message.edit_text(
-                        "👥 <b>УПРАВЛІННЯ КОРИСТУВАЧАМИ</b>\n\n"
-                        "📊 Всього користувачів: Підрахунок...\n"
-                        "🆕 Нових за сьогодні: Підрахунок...\n"
-                        "🏆 Топ користувачів: Завантаження...\n\n"
-                        "💡 Функція буде повністю доступна після підключення БД."
-                    )
-                else:
-                    await callback.message.edit_text(
-                        f"⚙️ <b>ФУНКЦІЯ: {data.replace('admin_', '').upper()}</b>\n\n"
-                        f"🚧 Ця функція знаходиться в розробці.\n"
-                        f"💡 Буде доступна в наступних оновленнях."
-                    )
-                
-                await callback.answer()
-
-            logger.info("✅ All handlers registered with automation support")
+            await app_module.main()
+            return
+        
+        # Варіант 2: Клас AutomatedUkrainianTelegramBot
+        elif hasattr(app_module, 'AutomatedUkrainianTelegramBot'):
+            logger.info("🎯 Знайдено клас AutomatedUkrainianTelegramBot, створюємо інстанс...")
+            print("🎯 Found AutomatedUkrainianTelegramBot class, creating instance...", flush=True)
             
-        except Exception as e:
-            logger.error(f"❌ Помилка реєстрації обробників: {e}")
-            logger.error(traceback.format_exc())
+            bot_instance = app_module.AutomatedUkrainianTelegramBot()
+            
+            # Перевіряємо методи запуску
+            if hasattr(bot_instance, 'run') and callable(getattr(bot_instance, 'run')):
+                logger.info("✅ Запускаємо через bot.run()...")
+                print("✅ Launching via bot.run()...", flush=True)
+                await bot_instance.run()
+            elif hasattr(bot_instance, 'main') and callable(getattr(bot_instance, 'main')):
+                logger.info("✅ Запускаємо через bot.main()...")  
+                print("✅ Launching via bot.main()...", flush=True)
+                await bot_instance.main()
+            else:
+                logger.error("❌ Клас не має методу run() або main()")
+                raise Exception("Bot class has no run() or main() method")
+            return
+        
+        # Варіант 3: Інший клас бота
+        elif hasattr(app_module, 'UkrainianTelegramBot'):
+            logger.info("🎯 Знайдено клас UkrainianTelegramBot, створюємо інстанс...")
+            print("🎯 Found UkrainianTelegramBot class, creating instance...", flush=True)
+            
+            bot_instance = app_module.UkrainianTelegramBot()
+            
+            if hasattr(bot_instance, 'run'):
+                await bot_instance.run()
+            elif hasattr(bot_instance, 'main'):
+                await bot_instance.main()
+            else:
+                logger.error("❌ Клас не має методу run() або main()")
+                raise Exception("Bot class has no run() or main() method")
+            return
+        
+        # Варіант 4: Глобальна змінна bot або dispatcher
+        elif hasattr(app_module, 'bot') and hasattr(app_module, 'dp'):
+            logger.info("🎯 Знайдено bot та dp змінні, запускаємо polling...")
+            print("🎯 Found bot and dp variables, starting polling...", flush=True)
+            
+            bot = getattr(app_module, 'bot')
+            dp = getattr(app_module, 'dp')
+            
+            # Запускаємо polling
+            await dp.start_polling(bot, skip_updates=True)
+            return
+        
+        # Варіант 5: Функція run_bot() або start_bot()
+        elif hasattr(app_module, 'run_bot') and callable(getattr(app_module, 'run_bot')):
+            logger.info("🎯 Знайдено функцію run_bot(), запускаємо...")
+            print("🎯 Found run_bot() function, launching...", flush=True)
+            
+            await app_module.run_bot()
+            return
+        
+        elif hasattr(app_module, 'start_bot') and callable(getattr(app_module, 'start_bot')):
+            logger.info("🎯 Знайдено функцію start_bot(), запускаємо...")
+            print("🎯 Found start_bot() function, launching...", flush=True)
+            
+            await app_module.start_bot()
+            return
+        
+        # Якщо нічого не знайшли - запускаємо fallback бот
+        else:
+            logger.warning("⚠️ Жоден entry point не знайдено в app/main.py")
+            print("⚠️ No entry point found in app/main.py", flush=True)
+            
+            # Показуємо доступні атрибути для діагностики
+            available_attrs = [attr for attr in dir(app_module) if not attr.startswith('_')]
+            logger.info(f"📋 Доступні атрибути в app/main.py: {available_attrs}")
+            print(f"📋 Available attributes in app/main.py: {available_attrs}", flush=True)
+            
+            logger.info("🆘 Запускаємо fallback бот...")
+            print("🆘 Starting fallback bot...", flush=True)
+            await run_fallback_bot()
+        
+    except ImportError as e:
+        logger.error(f"❌ Помилка імпорту app/main.py: {e}")
+        print(f"❌ Import error app/main.py: {e}", flush=True)
+        logger.error(traceback.format_exc())
+        
+        logger.info("🆘 Запускаємо fallback бот через import error...")
+        print("🆘 Starting fallback bot due to import error...", flush=True)
+        await run_fallback_bot()
+        
+    except Exception as e:
+        logger.error(f"❌ Помилка виконання app/main.py: {e}")
+        print(f"❌ Execution error app/main.py: {e}", flush=True)
+        logger.error(traceback.format_exc())
+        
+        logger.info("🆘 Запускаємо fallback бот через execution error...")
+        print("🆘 Starting fallback bot due to execution error...", flush=True)
+        await run_fallback_bot()
+
+async def run_fallback_bot():
+    """Fallback бот який точно працює"""
+    
+    logger.info("🆘 Запуск fallback бота...")
+    print("🆘 Starting fallback bot...", flush=True)
+    
+    try:
+        from aiogram import Bot, Dispatcher
+        from aiogram.enums import ParseMode
+        from aiogram.client.default import DefaultBotProperties
+        from aiogram.filters import Command
+        from aiogram.types import Message
+        
+        bot_token = os.getenv("BOT_TOKEN")
+        admin_id = int(os.getenv("ADMIN_ID", "603047391"))
+        
+        if not bot_token:
+            logger.error("❌ BOT_TOKEN не знайдено для fallback бота!")
+            print("❌ BOT_TOKEN not found for fallback bot!", flush=True)
+            return
+        
+        # Створюємо fallback бота
+        bot = Bot(
+            token=bot_token,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
+        
+        dp = Dispatcher()
+        
+        # Основні команди fallback бота
+        @dp.message(Command("start"))
+        async def fallback_start(message: Message):
+            user_name = message.from_user.first_name or "друже"
+            await message.answer(
+                f"🆘 <b>Fallback режим активний</b>\n\n"
+                f"Привіт, {user_name}! Я працюю в спрощеному режимі.\n\n"
+                f"📋 <b>Доступні команди:</b>\n"
+                f"• /start - це повідомлення\n"
+                f"• /status - статус бота\n"
+                f"• /help - довідка\n"
+                f"• /joke - випадковий жарт\n\n"
+                f"⚠️ <b>Адміну:</b> Перевірте логи Railway для виправлення проблем."
+            )
+        
+        @dp.message(Command("status"))
+        async def fallback_status(message: Message):
+            await message.answer(
+                f"🆘 <b>СТАТУС FALLBACK БОТА</b>\n\n"
+                f"🤖 Режим: Аварійний\n"
+                f"✅ Статус: Онлайн\n"
+                f"⏰ Час: {datetime.now().strftime('%H:%M %d.%m.%Y')}\n"
+                f"📡 Railway: Активний\n\n"
+                f"⚠️ Основний функціонал недоступний.\n"
+                f"Адміністратор має перевірити логи Railway."
+            )
+        
+        @dp.message(Command("help"))
+        async def fallback_help(message: Message):
+            await message.answer(
+                f"🆘 <b>FALLBACK БОТ - ДОВІДКА</b>\n\n"
+                f"Я працюю в аварійному режимі через проблеми з основним кодом.\n\n"
+                f"📋 <b>Доступні команди:</b>\n"
+                f"• /start - головне меню\n"
+                f"• /status - поточний статус\n"
+                f"• /help - ця довідка\n"
+                f"• /joke - випадковий жарт\n\n"
+                f"🔧 <b>Для адміністратора:</b>\n"
+                f"Перевірте Railway логи для діагностики.\n"
+                f"Проблема: entry point не знайдено в app/main.py"
+            )
+        
+        @dp.message(Command("joke"))
+        async def fallback_joke(message: Message):
+            import random
+            
+            jokes = [
+                "😂 Програміст заходить в кафе:\n- Каву, будь ласка.\n- Цукор?\n- Ні, boolean!",
+                "🤖 Чому боти не п'ють каву?\nБо вони працюють на енергетиках!",
+                "🔧 Fallback жарт:\nМій код не працює.\n- А чому?\n- Бо я в fallback режимі!",
+                "🚀 Railway розробник:\n- Чому бот крашиться?\n- Import error.\n- А fallback?\n- Працює!",
+                "🧠 AI жарт:\nЯ б розповів жарт про машинне навчання,\nале воно досі тренується!"
+            ]
+            
+            selected_joke = random.choice(jokes)
+            await message.answer(f"😄 <b>Fallback жарт:</b>\n\n{selected_joke}")
+        
+        # Адмін команди
+        @dp.message(Command("admin"))
+        async def fallback_admin(message: Message):
+            if message.from_user.id != admin_id:
+                await message.answer("❌ Доступ заборонено.")
+                return
+            
+            await message.answer(
+                f"👑 <b>FALLBACK АДМІН ПАНЕЛЬ</b>\n\n"
+                f"🆘 Бот працює в аварійному режимі.\n\n"
+                f"🔍 <b>Діагностика:</b>\n"
+                f"• Entry point не знайдено в app/main.py\n"
+                f"• Перевірте структуру файлу\n"
+                f"• Перевірте наявність функції main() або класу\n\n"
+                f"📋 <b>Railway логи:</b>\n"
+                f"Dashboard → Deployments → Logs\n\n"
+                f"🔧 <b>Виправлення:</b>\n"
+                f"1. Перевірте app/main.py\n"
+                f"2. Додайте функцію main() або клас\n"
+                f"3. Redeploy проект"
+            )
+        
+        # Перевірка підключення бота
+        bot_info = await bot.get_me()
+        logger.info(f"✅ Fallback бот підключено: @{bot_info.username}")
+        print(f"✅ Fallback bot connected: @{bot_info.username}", flush=True)
+        
+        # Запуск polling
+        logger.info("🚀 Запуск fallback polling...")
+        print("🚀 Starting fallback polling...", flush=True)
+        
+        await dp.start_polling(
+            bot, 
+            skip_updates=True,
+            allowed_updates=["message", "callback_query"]
+        )
+        
+    except Exception as e:
+        logger.error(f"💥 Критична помилка fallback бота: {e}")
+        print(f"💥 Critical fallback bot error: {e}", flush=True)
+        logger.error(traceback.format_exc())
+        raise
