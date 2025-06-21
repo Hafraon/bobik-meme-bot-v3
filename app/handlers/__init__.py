@@ -13,6 +13,7 @@
 
 import logging
 import random
+import os
 from typing import Optional, List, Dict, Any, Union, Callable
 from aiogram import Dispatcher
 from aiogram.filters import Command
