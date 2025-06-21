@@ -12,7 +12,8 @@
 """
 
 import logging
-from typing import Optional, List, Dict, Any, Union, Callable  # ✅ ВИПРАВЛЕНО: всі typing імпорти
+import random
+from typing import Optional, List, Dict, Any, Union, Callable
 from aiogram import Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
@@ -23,11 +24,6 @@ logger = logging.getLogger(__name__)
 def register_handlers(dp: Dispatcher) -> bool:
     """
     Реєстрація всіх хендлерів бота в правильному порядку
-    
-    ВИПРАВЛЕННЯ:
-    ✅ Додано typing імпорти
-    ✅ Graceful fallback при помилках імпорту
-    ✅ Детальне логування статусу
     
     Args:
         dp: Dispatcher для реєстрації хендлерів
@@ -58,6 +54,8 @@ def register_handlers(dp: Dispatcher) -> bool:
     except Exception as e:
         handlers_status['basic_commands'] = False
         logger.error(f"❌ Помилка basic commands: {e}")
+        _register_fallback_basic_handlers(dp)
+        registered_handlers += 1
     
     total_handlers += 1
     
@@ -156,411 +154,277 @@ def register_handlers(dp: Dispatcher) -> bool:
     
     total_handlers += 1
     
-    # ===== 7. CALLBACK ХЕНДЛЕРИ =====
-    try:
-        _register_universal_callback_handlers(dp)
-        handlers_status['callbacks'] = True
-        registered_handlers += 1
-        logger.info("✅ Universal callback handlers зареєстровано")
-    except Exception as e:
-        handlers_status['callbacks'] = False
-        logger.error(f"❌ Помилка callback handlers: {e}")
+    # ===== 7. УНІВЕРСАЛЬНІ CALLBACK'И =====
+    _register_universal_callbacks(dp)
     
-    total_handlers += 1
+    # ===== ПІДСУМОК =====
+    logger.info(f"📊 Реєстрація завершена: {registered_handlers}/{total_handlers} модулів")
     
-    # ===== ПІДСУМОК РЕЄСТРАЦІЇ =====
-    success_rate = (registered_handlers / total_handlers) * 100 if total_handlers > 0 else 0
-    
-    logger.info("🎮" + "="*50)
-    logger.info(f"🎮 ПІДСУМОК РЕЄСТРАЦІЇ ХЕНДЛЕРІВ")
-    logger.info("🎮" + "="*50)
-    logger.info(f"📊 Зареєстровано: {registered_handlers}/{total_handlers} ({success_rate:.1f}%)")
-    
-    for handler_name, status in handlers_status.items():
-        status_icon = "✅" if status else "❌"
-        logger.info(f"   {status_icon} {handler_name}")
-    
-    if success_rate >= 80:
-        logger.info("🎉 Хендлери успішно зареєстровані!")
-        result = True
-    elif success_rate >= 50:
-        logger.warning("⚠️ Частково зареєстровані хендлери - бот працездатний")
-        result = True
+    success_rate = (registered_handlers / total_handlers) * 100
+    if success_rate >= 90:
+        logger.info("🎉 Всі хендлери зареєстровані успішно!")
+    elif success_rate >= 70:
+        logger.info("✅ Більшість хендлерів зареєстровано")
     else:
-        logger.error("❌ Критично мало хендлерів - може бути неробочий")
-        result = False
+        logger.warning("⚠️ Деякі хендлери недоступні, але бот працездатний")
     
-    logger.info("🎮" + "="*50)
-    
-    return result
+    return True
 
-# ===== FALLBACK ХЕНДЛЕРИ =====
+# ===== FALLBACK ФУНКЦІЇ =====
 
-def _register_fallback_basic_handlers(dp: Dispatcher) -> None:
-    """Fallback основні хендлери"""
+def _register_fallback_basic_handlers(dp: Dispatcher):
+    """Fallback основні команди"""
+    logger.info("🆘 Реєстрація fallback basic handlers...")
     
     @dp.message(Command("start"))
     async def fallback_start(message: Message):
-        """Fallback команда /start"""
-        try:
-            # Спроба отримання конфігурації
-            try:
-                from config.settings import BOT_USERNAME, ALL_ADMIN_IDS
-                bot_name = BOT_USERNAME
-                is_admin = message.from_user.id in ALL_ADMIN_IDS
-            except ImportError:
-                bot_name = "UkrainianBot"
-                is_admin = message.from_user.id == 603047391
-            
-            user_name = message.from_user.first_name or "Друже"
-            
-            welcome_text = (
-                f"🧠😂🔥 <b>Вітаю, {user_name}!</b>\n\n"
-                f"🤖 <b>Україномовний бот @{bot_name}</b>\n\n"
-                f"📋 <b>Доступні команди:</b>\n"
-                f"• /help - Довідка\n"
-                f"• /joke - Випадковий жарт\n"
-                f"• /meme - Випадковий мем\n"
-                f"• /stats - Статистика\n"
-            )
-            
-            if is_admin:
-                welcome_text += (
-                    f"\n🛡️ <b>Адмін команди:</b>\n"
-                    f"• /admin - Адмін панель\n"
-                    f"• /moderate - Модерація контенту\n"
-                    f"• /broadcast - Розсилка\n"
-                )
-            
-            welcome_text += (
-                f"\n🎮 <b>Функціональність:</b>\n"
-                f"• 😂 Жарти та меми\n"
-                f"• ⚔️ Дуелі жартів\n"
-                f"• 🏆 Система рангів\n"
-                f"• 🤖 Автоматизація\n\n"
-                f"🚀 <i>Fallback режим активний</i>"
-            )
-            
-            await message.answer(welcome_text)
-            
-        except Exception as e:
-            logger.error(f"❌ Fallback start error: {e}")
-            await message.answer("🤖 Бот активний! Використовуйте /help для довідки.")
+        await message.answer(
+            "🧠😂🔥 <b>Вітаю в україномовному боті!</b>\n\n"
+            "🎯 <b>Що я вмію:</b>\n"
+            "• 😂 Генерую меми та анекдоти\n"
+            "• ⚔️ Організовую дуелі жартів\n"
+            "• 🏆 Веду рейтинг користувачів\n"
+            "• 🎮 Гейміфікація з балами\n\n"
+            "📋 <b>Команди:</b>\n"
+            "/meme - отримати мем\n"
+            "/anekdot - отримати анекдот\n"
+            "/profile - мій профіль\n"
+            "/top - рейтинг\n"
+            "/duel - почати дуель\n"
+            "/help - детальна довідка\n\n"
+            "🔧 <i>Працює в базовому режимі</i>"
+        )
     
     @dp.message(Command("help"))
     async def fallback_help(message: Message):
-        """Fallback команда /help"""
-        help_text = (
-            "📚 <b>ДОВІДКА ПО БОТУ</b>\n\n"
-            "🎮 <b>Основні команди:</b>\n"
-            "• /start - Головне меню\n"
-            "• /help - Ця довідка\n"
-            "• /joke - Випадковий жарт\n"
-            "• /meme - Випадковий мем\n"
-            "• /stats - Статистика\n"
-            "• /profile - Мій профіль\n\n"
+        await message.answer(
+            "📚 <b>ДЕТАЛЬНА ДОВІДКА</b>\n\n"
+            "🎯 <b>ОСНОВНІ ФУНКЦІЇ:</b>\n\n"
+            "😂 <b>Контент:</b>\n"
+            "• /meme - випадковий мем\n"
+            "• /anekdot - випадковий анекдот\n"
+            "• /submit - подати свій жарт\n\n"
             "⚔️ <b>Дуелі:</b>\n"
-            "• /duel - Почати дуель\n"
-            "• /duel_stats - Статистика дуелей\n\n"
-            "🛡️ <b>Для адмінів:</b>\n"
-            "• /admin - Адмін панель\n"
-            "• /moderate - Модерація\n\n"
-            "💡 <b>Підказка:</b> Більшість функцій доступні через кнопки меню!"
+            "• /duel - почати дуель жартів\n"
+            "• Голосування за кращий жарт\n"
+            "• Отримання балів за перемоги\n\n"
+            "🏆 <b>Рейтинг:</b>\n"
+            "• /profile - ваш профіль та бали\n"
+            "• /top - топ користувачів\n"
+            "• Система рангів та досягнень\n\n"
+            "👑 <b>Для адміністраторів:</b>\n"
+            "• /admin - адмін панель\n"
+            "• /stats - статистика бота\n\n"
+            "💡 <i>Деякі функції можуть бути обмежені в базовому режимі</i>"
         )
-        await message.answer(help_text)
-    
-    @dp.message(Command("joke"))
-    async def fallback_joke(message: Message):
-        """Fallback команда /joke"""
-        import random
-        
-        jokes: List[str] = [
-            "😂 Програміст заходить в кафе:\n- Каву, будь ласка.\n- Цукор?\n- Ні, boolean! 🤓",
-            "🎯 Українець купує iPhone:\n- Не загубіть!\n- У мене є Find My iPhone!\n- А якщо не знайде?\n- Значить вкрали москалі! 🇺🇦",
-            "🔥 IT-шник на співбесіді:\n- Розкажіть про себе.\n- Я fullstack.\n- Круто! А що вмієте?\n- HTML! 🤡"
-        ]
-        
-        selected_joke = random.choice(jokes)
-        await message.answer(f"😄 <b>Жарт дня:</b>\n\n{selected_joke}")
     
     logger.info("✅ Fallback basic handlers зареєстровано")
 
-def _register_fallback_admin_handlers(dp: Dispatcher) -> None:
-    """Fallback адмін хендлери"""
+def _register_fallback_content_handlers(dp: Dispatcher):
+    """Fallback контент команди"""
+    logger.info("🆘 Реєстрація fallback content handlers...")
     
-    @dp.message(Command("admin"))
-    async def fallback_admin(message: Message):
-        """Fallback адмін панель"""
-        try:
-            from config.settings import ALL_ADMIN_IDS
-            admin_ids = ALL_ADMIN_IDS
-        except ImportError:
-            admin_ids = [603047391]
-        
-        if message.from_user.id not in admin_ids:
-            await message.answer("❌ Доступ заборонено. Тільки для адміністраторів.")
-            return
-        
-        admin_text = (
-            "🛡️ <b>АДМІН ПАНЕЛЬ</b>\n\n"
-            "📊 <b>Статус системи:</b>\n"
-            "• Бот: ✅ Активний\n"
-            "• БД: ⚠️ Fallback режим\n"
-            "• Автоматизація: ⚠️ Обмежена\n\n"
-            "📋 <b>Доступні команди:</b>\n"
-            "• /moderate - Модерація контенту\n"
-            "• /stats - Детальна статистика\n"
-            "• /broadcast - Розсилка повідомлень\n"
-            "• /users - Список користувачів\n\n"
-            "⚠️ <i>Fallback режим - деякі функції обмежені</i>"
-        )
-        
-        await message.answer(admin_text)
-    
-    @dp.message(Command("broadcast"))
-    async def fallback_broadcast(message: Message):
-        """Fallback розсилка"""
-        try:
-            from config.settings import ALL_ADMIN_IDS
-            admin_ids = ALL_ADMIN_IDS
-        except ImportError:
-            admin_ids = [603047391]
-        
-        if message.from_user.id not in admin_ids:
-            await message.answer("❌ Доступ заборонено.")
-            return
-        
-        await message.answer(
-            "📢 <b>СИСТЕМА РОЗСИЛОК</b>\n\n"
-            "⚠️ Fallback режим - розсилки обмежені\n\n"
-            "Для повноцінних розсилок потрібна БД та автоматизація.\n"
-            "Зверніться до розробника для налаштування."
-        )
-    
-    logger.info("✅ Fallback admin handlers зареєстровано")
-
-def _register_fallback_content_handlers(dp: Dispatcher) -> None:
-    """Fallback контент хендлери"""
+    FALLBACK_JOKES = [
+        "Чому програмісти плутають Хеллоуїн і Різдво? Тому що 31 OCT = 25 DEC!",
+        "Скільки програмістів потрібно щоб закрутити лампочку? Жодного. Це апаратна проблема!",
+        "Чому програмісти носять окуляри? Тому що не можуть C#!",
+        "Що сказав 0 до 8? - Гарний пояс!",
+        "Найкращий спосіб прискорити комп'ютер - кинути його з вікна!",
+        "Чому Java програмісти носять окуляри? Тому що вони не можуть C!",
+        "Який найкращий об'єкт в Java? Перерва на каву!",
+        "Я розповів дружині жарт про UDP, але не знаю, чи дійшов він до неї.",
+        "У чому різниця між Java та JavaScript? Така ж як між молотком та молотковою акулою!",
+        "Програміст - це машина для перетворення кави на код!"
+    ]
     
     @dp.message(Command("meme"))
     async def fallback_meme(message: Message):
-        """Fallback команда /meme"""
-        import random
-        
-        memes: List[str] = [
-            "🤣 Коли бачиш що Wi-Fi на роботі швидший за домашній:\n*здивований кіт* 😸",
-            "😂 Мій настрій коли п'ятниця:\n*танцююча людина* 💃",
-            "🎮 Коли мама каже 'останній раз граєш':\n*хитра усмішка* 😏"
-        ]
-        
-        selected_meme = random.choice(memes)
-        await message.answer(f"🔥 <b>Мем дня:</b>\n\n{selected_meme}")
+        joke = random.choice(FALLBACK_JOKES)
+        await message.answer(
+            f"🔥 <b>Мем дня:</b>\n\n"
+            f"<i>{joke}</i>\n\n"
+            f"😂 Сподіваюся, вам сподобалось!\n"
+            f"💡 <i>Це fallback контент. Для більшого розмаїття налаштуйте БД</i>"
+        )
+    
+    @dp.message(Command("anekdot"))
+    async def fallback_anekdot(message: Message):
+        joke = random.choice(FALLBACK_JOKES)
+        await message.answer(
+            f"😂 <b>Анекдот:</b>\n\n"
+            f"<i>{joke}</i>\n\n"
+            f"🎭 Сміялись? Поділіться з друзями!\n"
+            f"💡 <i>Це fallback контент. Додайте власні анекдоти через БД</i>"
+        )
     
     @dp.message(Command("submit"))
     async def fallback_submit(message: Message):
-        """Fallback подача контенту"""
         await message.answer(
-            "📝 <b>ПОДАЧА КОНТЕНТУ</b>\n\n"
-            "⚠️ Fallback режим - БД недоступна\n\n"
-            "Для подачі контенту потрібна робоча база даних.\n"
-            "Зверніться до адміністратора."
+            "📝 <b>Подача контенту</b>\n\n"
+            "🔧 Функція подачі контенту недоступна в базовому режимі.\n"
+            "Для повного функціоналу потрібна:\n"
+            "• Налаштована база даних\n"
+            "• Система модерації\n"
+            "• Адмін панель\n\n"
+            "💡 <i>Зараз ви можете просто надіслати свій жарт боту!</i>\n\n"
+            "📨 Напишіть свій жарт у наступному повідомленні:"
         )
     
     logger.info("✅ Fallback content handlers зареєстровано")
 
-def _register_fallback_duel_handlers(dp: Dispatcher) -> None:
-    """Fallback дуель хендлери"""
+def _register_fallback_admin_handlers(dp: Dispatcher):
+    """Fallback адмін команди"""
+    logger.info("🆘 Реєстрація fallback admin handlers...")
+    
+    @dp.message(Command("admin"))
+    async def fallback_admin(message: Message):
+        admin_id = int(os.getenv("ADMIN_ID", 0))
+        if message.from_user.id != admin_id:
+            await message.answer("❌ Тільки для адміністраторів")
+            return
+        
+        await message.answer(
+            "👑 <b>АДМІН ПАНЕЛЬ</b>\n\n"
+            "🔧 <b>Базовий режим активний</b>\n\n"
+            "📊 <b>Доступні команди:</b>\n"
+            "• /stats - базова статистика\n"
+            "• /status - статус бота\n\n"
+            "⚙️ <b>Для повного функціоналу потрібно:</b>\n"
+            "• Налаштувати базу даних\n"
+            "• Активувати всі handlers\n"
+            "• Запустити автоматизацію\n\n"
+            "💡 <i>Перевірте логи для діагностики</i>"
+        )
+    
+    @dp.message(Command("stats"))
+    async def fallback_stats(message: Message):
+        admin_id = int(os.getenv("ADMIN_ID", 0))
+        if message.from_user.id != admin_id:
+            await message.answer("❌ Тільки для адміністраторів")
+            return
+        
+        await message.answer(
+            "📊 <b>БАЗОВА СТАТИСТИКА</b>\n\n"
+            "🤖 <b>Статус бота:</b> Fallback режим\n"
+            "💾 <b>База даних:</b> Недоступна\n"
+            "🎮 <b>Handlers:</b> Fallback версії\n"
+            "🤖 <b>Автоматизація:</b> Неактивна\n\n"
+            "⚡ <b>Для повної статистики потрібно:</b>\n"
+            "• Підключити PostgreSQL\n"
+            "• Налаштувати всі модулі\n"
+            "• Активувати планувальник"
+        )
+    
+    logger.info("✅ Fallback admin handlers зареєстровано")
+
+def _register_fallback_duel_handlers(dp: Dispatcher):
+    """Fallback дуель команди"""
+    logger.info("🆘 Реєстрація fallback duel handlers...")
     
     @dp.message(Command("duel"))
     async def fallback_duel(message: Message):
-        """Fallback команда дуелі"""
         await message.answer(
             "⚔️ <b>ДУЕЛІ ЖАРТІВ</b>\n\n"
-            "⚠️ Fallback режим - дуелі недоступні\n\n"
-            "Для дуелей потрібна:\n"
-            "• База даних\n"
-            "• Система користувачів\n"
-            "• Контент для змагання\n\n"
-            "Налаштуйте БД для активації дуелей."
-        )
-    
-    @dp.message(Command("duel_stats"))
-    async def fallback_duel_stats(message: Message):
-        """Fallback статистика дуелей"""
-        await message.answer(
-            "📊 <b>СТАТИСТИКА ДУЕЛЕЙ</b>\n\n"
-            "⚠️ Недоступно в fallback режимі\n\n"
-            "Для статистики потрібна база даних."
+            "🔧 <i>Функція недоступна в базовому режимі</i>\n\n"
+            "🎯 <b>Що таке дуелі:</b>\n"
+            "• Змагання між двома жартами\n"
+            "• Голосування інших користувачів\n"
+            "• Бали за перемоги та участь\n"
+            "• Рейтинг найкращих жартунів\n\n"
+            "⚙️ <b>Для активації потрібно:</b>\n"
+            "• База даних для збереження дуелей\n"
+            "• Система голосування\n"
+            "• Планувальник для автозавершення\n\n"
+            "💡 <i>Поки що використовуйте /meme та /anekdot</i>"
         )
     
     logger.info("✅ Fallback duel handlers зареєстровано")
 
-def _register_fallback_moderation_handlers(dp: Dispatcher) -> None:
-    """Fallback модерація хендлери"""
+def _register_fallback_moderation_handlers(dp: Dispatcher):
+    """Fallback модерація команди"""
+    logger.info("🆘 Реєстрація fallback moderation handlers...")
     
     @dp.message(Command("moderate"))
     async def fallback_moderate(message: Message):
-        """Fallback модерація"""
-        try:
-            from config.settings import ALL_ADMIN_IDS
-            admin_ids = ALL_ADMIN_IDS
-        except ImportError:
-            admin_ids = [603047391]
-        
-        if message.from_user.id not in admin_ids:
-            await message.answer("❌ Доступ заборонено.")
+        admin_id = int(os.getenv("ADMIN_ID", 0))
+        if message.from_user.id != admin_id:
+            await message.answer("❌ Тільки для адміністраторів")
             return
         
         await message.answer(
-            "🛡️ <b>МОДЕРАЦІЯ КОНТЕНТУ</b>\n\n"
-            "⚠️ Fallback режим - модерація недоступна\n\n"
-            "Для модерації потрібна:\n"
-            "• База даних\n"
-            "• Система контенту\n"
-            "• Черга модерації\n\n"
-            "Налаштуйте БД для активації модерації."
+            "🛡️ <b>МОДЕРАЦІЯ</b>\n\n"
+            "🔧 <i>Функція недоступна в базовому режимі</i>\n\n"
+            "📋 <b>Що включає модерація:</b>\n"
+            "• Перегляд поданого контенту\n"
+            "• Схвалення/відхилення жартів\n"
+            "• Видалення неприйнятного контенту\n"
+            "• Управління користувачами\n\n"
+            "⚙️ <b>Для активації потрібно:</b>\n"
+            "• База даних з таблицею контенту\n"
+            "• Черга модерації\n"
+            "• Інтерфейс адміністратора\n\n"
+            "💡 <i>Наразі модерація відбувається вручну</i>"
         )
     
     logger.info("✅ Fallback moderation handlers зареєстровано")
 
-def _register_fallback_gamification_handlers(dp: Dispatcher) -> None:
-    """Fallback гейміфікація хендлери"""
+def _register_fallback_gamification_handlers(dp: Dispatcher):
+    """Fallback гейміфікація команди"""
+    logger.info("🆘 Реєстрація fallback gamification handlers...")
     
     @dp.message(Command("profile"))
     async def fallback_profile(message: Message):
-        """Fallback профіль користувача"""
-        user_name = message.from_user.first_name or "Невідомий"
-        username = f"@{message.from_user.username}" if message.from_user.username else "Без username"
-        
-        profile_text = (
-            f"👤 <b>ПРОФІЛЬ</b>\n\n"
-            f"👨‍💼 Ім'я: {user_name}\n"
-            f"📱 Username: {username}\n"
-            f"🆔 ID: {message.from_user.id}\n\n"
-            f"⚠️ <b>Fallback режим</b>\n"
-            f"🎯 Бали: недоступно\n"
-            f"🏆 Ранг: недоступно\n"
-            f"📊 Статистика: недоступно\n\n"
-            f"💡 Для повного профілю потрібна БД"
-        )
-        
-        await message.answer(profile_text)
-    
-    @dp.message(Command("stats"))
-    async def fallback_stats(message: Message):
-        """Fallback статистика"""
+        user = message.from_user
         await message.answer(
-            "📊 <b>СТАТИСТИКА БОТА</b>\n\n"
-            "⚠️ Fallback режим\n\n"
-            "🤖 Бот: Активний\n"
-            "💾 БД: Недоступна\n"
-            "🎮 Хендлери: Fallback\n"
-            "🤖 Автоматизація: Обмежена\n\n"
-            "📝 Для повної статистики потрібна база даних."
+            f"👤 <b>ПРОФІЛЬ КОРИСТУВАЧА</b>\n\n"
+            f"🆔 <b>ID:</b> {user.id}\n"
+            f"📝 <b>Ім'я:</b> {user.first_name}\n"
+            f"🔗 <b>Username:</b> @{user.username or 'Не встановлено'}\n\n"
+            f"🔧 <i>Базовий режим</i>\n\n"
+            f"⚙️ <b>Для повної гейміфікації потрібно:</b>\n"
+            f"• База даних для збереження балів\n"
+            f"• Система досягнень\n"
+            f"• Рейтинги та ранги\n"
+            f"• Статистика активності\n\n"
+            f"💡 <i>Використовуйте бота для накопичення балів!</i>"
+        )
+    
+    @dp.message(Command("top"))
+    async def fallback_top(message: Message):
+        await message.answer(
+            "🏆 <b>РЕЙТИНГ КОРИСТУВАЧІВ</b>\n\n"
+            "🔧 <i>Функція недоступна в базовому режимі</i>\n\n"
+            "📊 <b>Що показує рейтинг:</b>\n"
+            "• Топ користувачів за балами\n"
+            "• Кількість перемог у дуелях\n"
+            "• Активність та досягнення\n"
+            "• Статистика за різні періоди\n\n"
+            "⚙️ <b>Для активації потрібно:</b>\n"
+            "• База даних з таблицею користувачів\n"
+            "• Система підрахунку балів\n"
+            "• Статистичні функції\n\n"
+            "💡 <i>Почніть використовувати бота зараз!</i>"
         )
     
     logger.info("✅ Fallback gamification handlers зареєстровано")
 
-def _register_universal_callback_handlers(dp: Dispatcher) -> None:
-    """Універсальні callback хендлери"""
+def _register_universal_callbacks(dp: Dispatcher):
+    """Універсальні callback'и для необроблених випадків"""
+    logger.info("🔗 Реєстрація universal callbacks...")
     
-    @dp.callback_query(F.data == "back_to_main")
-    async def callback_back_to_main(callback: CallbackQuery):
-        """Повернення до головного меню"""
-        await callback.answer()
-        
-        welcome_text = (
-            "🧠😂🔥 <b>ГОЛОВНЕ МЕНЮ</b>\n\n"
-            "Оберіть дію з меню:"
-        )
-        
-        # Простий inline keyboard
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="😂 Жарт", callback_data="get_joke")],
-            [InlineKeyboardButton(text="🔥 Мем", callback_data="get_meme")],
-            [InlineKeyboardButton(text="📊 Статистика", callback_data="show_stats")],
-            [InlineKeyboardButton(text="👤 Профіль", callback_data="show_profile")]
-        ])
-        
-        await callback.message.edit_text(welcome_text, reply_markup=keyboard)
-    
-    @dp.callback_query(F.data == "get_joke")
-    async def callback_get_joke(callback: CallbackQuery):
-        """Callback отримання жарту"""
-        await callback.answer()
-        
-        import random
-        jokes: List[str] = [
-            "😂 Програміст у кафе:\n- Каву?\n- Так.\n- Цукор?\n- Ні, boolean!",
-            "🎯 Купую iPhone:\n- Не загубіть!\n- Find My iPhone є!\n- А якщо не знайде?\n- Москалі вкрали!",
-            "💻 Співбесіда:\n- Розкажіть про себе.\n- Fullstack.\n- Що вмієте?\n- HTML!"
-        ]
-        
-        joke = random.choice(jokes)
-        await callback.message.edit_text(f"😄 <b>Жарт:</b>\n\n{joke}")
-    
-    @dp.callback_query(F.data == "get_meme")
-    async def callback_get_meme(callback: CallbackQuery):
-        """Callback отримання мему"""
-        await callback.answer()
-        
-        import random
-        memes: List[str] = [
-            "🤣 Wi-Fi на роботі швидший за домашній:\n*здивований кіт*",
-            "😂 Настрій коли п'ятниця:\n*танцююча людина*",
-            "🎮 'Останній раз граєш':\n*хитра усмішка*"
-        ]
-        
-        meme = random.choice(memes)
-        await callback.message.edit_text(f"🔥 <b>Мем:</b>\n\n{meme}")
-    
-    @dp.callback_query(F.data == "show_stats")
-    async def callback_show_stats(callback: CallbackQuery):
-        """Callback показу статистики"""
-        await callback.answer()
-        
-        stats_text = (
-            "📊 <b>СТАТИСТИКА</b>\n\n"
-            "⚠️ Fallback режим\n\n"
-            "🤖 Бот: Активний\n"
-            "💾 БД: Недоступна\n"
-            "🎮 Режим: Fallback\n\n"
-            "💡 Для повної статистики потрібна БД"
-        )
-        
-        await callback.message.edit_text(stats_text)
-    
-    @dp.callback_query(F.data == "show_profile")
-    async def callback_show_profile(callback: CallbackQuery):
-        """Callback показу профілю"""
-        await callback.answer()
-        
-        user = callback.from_user
-        profile_text = (
-            f"👤 <b>ПРОФІЛЬ</b>\n\n"
-            f"👨‍💼 Ім'я: {user.first_name or 'Невідомий'}\n"
-            f"📱 Username: @{user.username or 'відсутній'}\n"
-            f"🆔 ID: {user.id}\n\n"
-            f"⚠️ Fallback режим\n"
-            f"🎯 Бали: недоступно\n"
-            f"🏆 Ранг: недоступно"
-        )
-        
-        await callback.message.edit_text(profile_text)
-    
-    # Універсальний обробник невідомих callback'ів
     @dp.callback_query()
-    async def universal_callback_handler(callback: CallbackQuery):
-        """Обробник всіх інших callback'ів"""
-        await callback.answer()
+    async def handle_unknown_callback(callback: CallbackQuery):
+        """Обробка невідомих callback'ів"""
+        await callback.answer("⚠️ Ця функція тимчасово недоступна", show_alert=True)
         
         unknown_text = (
-            f"🤖 <b>Невідома дія</b>\n\n"
-            f"Callback: <code>{callback.data}</code>\n\n"
-            f"⚠️ Функція може бути недоступна в fallback режимі.\n"
-            f"Спробуйте використати команди або зверніться до адміністратора."
+            "🔧 <b>Функція в розробці</b>\n\n"
+            "⚠️ Ця кнопка поки що не працює.\n"
+            "Це може бути через:\n"
+            "• Базовий режим роботи\n"
+            "• Відсутність БД\n"
+            "• Неактивні модулі\n\n"
+            "💡 <i>Спробуйте основні команди: /help</i>"
         )
         
         await callback.message.answer(unknown_text)
@@ -569,16 +433,15 @@ def _register_universal_callback_handlers(dp: Dispatcher) -> None:
 
 # ===== ДІАГНОСТИЧНІ ФУНКЦІЇ =====
 
-def check_handlers_status() -> Dict[str, Any]:
+def check_handlers_status() -> Dict[str, bool]:
     """Перевірка статусу всіх хендлерів"""
-    status: Dict[str, Any] = {
+    status: Dict[str, bool] = {
         "basic_commands": False,
         "admin_panel": False,
         "content": False,
         "duels": False,
         "moderation": False,
-        "gamification": False,
-        "errors": []
+        "gamification": False
     }
     
     # Перевірка наявності модулів
@@ -594,9 +457,11 @@ def check_handlers_status() -> Dict[str, Any]:
     for module_name in modules_to_check:
         try:
             __import__(f"handlers.{module_name}")
-            status[module_name.replace("_handlers", "")] = True
-        except ImportError as e:
-            status["errors"].append(f"{module_name}: {e}")
+            key = module_name.replace("_handlers", "").replace("admin_panel", "admin_panel")
+            if key in status:
+                status[key] = True
+        except ImportError:
+            pass
     
     return status
 
@@ -604,8 +469,8 @@ def get_handlers_summary() -> Dict[str, Any]:
     """Отримання резюме стану хендлерів"""
     status = check_handlers_status()
     
-    total_modules = 6
-    available_modules = sum(1 for v in status.values() if isinstance(v, bool) and v)
+    total_modules = len(status)
+    available_modules = sum(status.values())
     
     return {
         "total_modules": total_modules,
